@@ -7,47 +7,83 @@ const COCO_FALLBACK = [
   "bicycle", "car", "dog", "bottle", "backpack", "tv",
 ];
 
-// On-device YOLOv8 object detection via WebGPU. Weights come from /models/manifest.json,
-// which the RSI trainer republishes as the detector improves. Falls back to mock boxes if
-// no model is published yet or WebGPU is unavailable, so the app always runs.
+// On-device object detection. Three tiers, chosen at load time:
+//   1. "onnx"         — RSI-trained YOLOv8 from /models/manifest.json (onnxruntime-web/WebGPU)
+//   2. "transformers" — Xenova/yolos-tiny from CDN (transformers.js/WebGPU); real detection
+//                       out-of-the-box, no weights to host. Used until RSI publishes an ONNX.
+//   3. "mock"         — random boxes, only if WebGPU is unavailable, so the app still runs.
 export class Detector {
   constructor() {
+    this.mode = "mock";
     this.session = null;
+    this.tjs = null;
     this.labels = COCO_FALLBACK;
     this.size = 640;
     this.version = 0;
-    this.mock = true;
     this.confThreshold = 0.35;
     this.iouThreshold = 0.45;
   }
 
   async load() {
+    if (await this._tryOnnx()) this.mode = "onnx";
+    else if (await this._tryTransformers()) this.mode = "transformers";
+    else this.mode = "mock";
+    return this.mode;
+  }
+
+  async _tryOnnx() {
     try {
       const m = await fetch("/models/manifest.json").then((r) => r.json());
+      const head = await fetch(m.url, { method: "HEAD" });
+      if (!head.ok) return false; // no RSI-published weights yet
       this.labels = m.labels?.length ? m.labels : COCO_FALLBACK;
       this.size = m.input_size || 640;
       this.version = m.version || 0;
-      const head = await fetch(m.url, { method: "HEAD" });
-      if (!head.ok) throw new Error("detector weights not published yet");
-      this.session = await ort.InferenceSession.create(m.url, {
-        executionProviders: ["webgpu", "wasm"],
-      });
-      this.mock = false;
+      this.session = await ort.InferenceSession.create(m.url, { executionProviders: ["webgpu", "wasm"] });
+      return true;
     } catch (e) {
-      console.warn("[detector] mock mode:", e.message);
-      this.mock = true;
+      console.warn("[detector] no onnx:", e.message);
+      return false;
     }
-    return !this.mock;
+  }
+
+  async _tryTransformers() {
+    try {
+      const { pipeline, env } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2");
+      env.allowLocalModels = false;
+      this.tjs = await pipeline("object-detection", "Xenova/yolos-tiny", { device: "webgpu" });
+      return true;
+    } catch (e) {
+      console.warn("[detector] no transformers.js:", e.message);
+      return false;
+    }
   }
 
   async detect(canvas) {
-    if (this.mock) return this._mock(canvas);
+    if (this.mode === "onnx") return this._detectOnnx(canvas);
+    if (this.mode === "transformers") return this._detectTransformers(canvas);
+    return this._mock(canvas);
+  }
+
+  async _detectTransformers(canvas) {
+    const url = canvas.convertToBlob
+      ? URL.createObjectURL(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 }))
+      : canvas.toDataURL("image/jpeg", 0.7);
+    const res = await this.tjs(url, { threshold: 0.3 });
+    if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+    return res.map((r) => ({
+      label: r.label,
+      confidence: r.score,
+      bbox: { x1: r.box.xmin, y1: r.box.ymin, x2: r.box.xmax, y2: r.box.ymax },
+    }));
+  }
+
+  async _detectOnnx(canvas) {
     const { tensor, scale, padX, padY } = this._preprocess(canvas);
     const feeds = {};
     feeds[this.session.inputNames[0]] = tensor;
     const out = await this.session.run(feeds);
-    const t = out[this.session.outputNames[0]];
-    return this._postprocess(t, scale, padX, padY);
+    return this._postprocess(out[this.session.outputNames[0]], scale, padX, padY);
   }
 
   _preprocess(canvas) {
@@ -77,7 +113,7 @@ export class Detector {
 
   _postprocess(t, scale, padX, padY) {
     const d = t.data;
-    const [, ch, n] = t.dims; // [1, 4+numClasses, 8400]
+    const [, ch, n] = t.dims;
     const numClasses = ch - 4;
     const boxes = [];
     for (let i = 0; i < n; i++) {

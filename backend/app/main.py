@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .brightdata.client import BrightDataSearch
@@ -79,9 +78,6 @@ def rsi_cycle() -> dict:
 # RSI-published detector weights (manifest + .onnx) live here.
 app.mount("/models", StaticFiles(directory=MODELS), name="models")
 
+# Frontend served at root (mounted last so /api/* and /models take precedence).
 if FRONTEND.is_dir():
-    app.mount("/app", StaticFiles(directory=FRONTEND, html=True), name="frontend")
-
-    @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(FRONTEND / "index.html")
+    app.mount("/", StaticFiles(directory=FRONTEND, html=True), name="frontend")

@@ -54,7 +54,7 @@ async function boot() {
 
   setStatus("Loading on-device models…");
   const [det, dep] = await Promise.all([detector.load(), depth.load()]);
-  setStatus(`detector:${det ? "yolo" : "mock"} depth:${dep ? "webgpu" : "mock"} · loading LLM…`);
+  setStatus(`detector:${det} · depth:${dep ? "webgpu" : "mock"} · loading LLM…`);
   // LLM is heaviest; load in background so navigation can start immediately.
   llm.load((p) => setStatus(`LLM ${(p.progress * 100 || 0).toFixed(0)}% ${p.text || ""}`.slice(0, 60)))
     .then((ok) => setStatus(ok ? "ready (LLM on edge)" : "ready (LLM mock — no WebGPU)"));
@@ -148,8 +148,13 @@ function setupVoice() {
   const rec = new SR();
   rec.lang = "en-US";
   rec.onresult = (e) => ask(e.results[0][0].transcript);
-  els.talk.addEventListener("pointerdown", () => rec.start());
-  els.talk.addEventListener("pointerup", () => rec.stop());
+  rec.onstart = () => els.talk.classList.add("listening");
+  rec.onend = () => els.talk.classList.remove("listening");
+  const start = (e) => { e.preventDefault(); try { rec.start(); } catch (_) {} };
+  const stop = (e) => { e.preventDefault(); try { rec.stop(); } catch (_) {} };
+  els.talk.addEventListener("pointerdown", start);
+  els.talk.addEventListener("pointerup", stop);
+  els.talk.addEventListener("pointercancel", stop);
 }
 
 els.start.disabled = true;
