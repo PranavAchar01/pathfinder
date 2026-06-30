@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     rsi_min_confidence: float = 0.45
     rsi_review_every: int = 50
     rsi_data_dir: str = "data"
+    rsi_epochs: int = 25
+    # Continuous runner: keep submitting self-training cycles until RunPod credits run out.
+    rsi_burn_classes: str = (
+        "person,bicycle,car,bus,truck,traffic light,stop sign,fire hydrant,bench,dog,"
+        "chair,door,stairs,pole,curb,crosswalk,backpack,suitcase,potted plant"
+    )
+    rsi_burn_batch: int = 5
+    rsi_burn_min_balance_usd: float = 0.50
 
     host: str = "0.0.0.0"
     port: int = 8000

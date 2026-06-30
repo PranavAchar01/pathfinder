@@ -3,18 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import httpx
-
 from ..config import get_settings
 from .client import BrightDataSearch
 
-# Bright Data Image / Web Unlocker fetches reference imagery to grow the training set
-# for object classes the detector is weak on.
-_UNLOCKER_ENDPOINT = "https://api.brightdata.com/request"
-
 
 class TrainingDataIngestor:
-    """Gather labeled imagery + descriptions for weak/unknown classes via Bright Data."""
+    """Gather labeled imagery for weak/unknown classes via Bright Data and write a real,
+    trainable shard (downloaded image files + a manifest) that the RunPod trainer consumes."""
 
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -23,29 +18,32 @@ class TrainingDataIngestor:
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
     def gather(self, label: str, count: int = 20) -> dict:
-        """Collect reference data for one object class and write a manifest shard."""
-        results = self.search.search(f"{label} object photo", limit=count)
-        records = [{"label": label, "title": r.title, "url": r.url, "snippet": r.snippet} for r in results]
+        """Collect reference imagery for one class. Downloads real image bytes through Bright
+        Data (SERP image search -> Web Unlocker fetch) into data/harvest/<label>/ and writes a
+        shard manifest the trainer self-labels on."""
+        slug = label.replace(" ", "_")
+        img_dir = self.out_dir / slug
+        img_dir.mkdir(parents=True, exist_ok=True)
 
-        if self.settings.brightdata_api_key:
-            for rec in records:
-                rec["image"] = self._fetch_image_url(rec["url"])
+        hits = self.search.image_search(f"{label}", limit=count)
+        records = []
+        for i, r in enumerate(hits):
+            rec = {"label": label, "title": r.title, "url": r.url, "image_url": r.image, "file": ""}
+            if r.image and self.settings.brightdata_api_key:
+                try:
+                    data = self.search.fetch_bytes(r.image)
+                    if data and len(data) > 1024:
+                        fp = img_dir / f"{slug}_{i:03d}.jpg"
+                        fp.write_bytes(data)
+                        rec["file"] = str(fp)
+                except Exception:  # noqa: BLE001 - a dead image URL must not kill the harvest
+                    pass
+            records.append(rec)
 
-        shard = self.out_dir / f"{label.replace(' ', '_')}.jsonl"
+        shard = self.out_dir / f"{slug}.jsonl"
         with shard.open("w") as fh:
             for rec in records:
                 fh.write(json.dumps(rec) + "\n")
-        return {"label": label, "records": len(records), "shard": str(shard)}
 
-    def _fetch_image_url(self, page_url: str) -> str:
-        try:
-            resp = httpx.post(
-                _UNLOCKER_ENDPOINT,
-                headers={"Authorization": f"Bearer {self.settings.brightdata_api_key}"},
-                json={"zone": self.settings.brightdata_unlocker_zone, "url": page_url, "format": "raw"},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return page_url
-        except httpx.HTTPError:
-            return ""
+        downloaded = sum(1 for r in records if r["file"])
+        return {"label": label, "records": len(records), "images": downloaded, "shard": str(shard)}

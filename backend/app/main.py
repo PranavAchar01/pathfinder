@@ -75,6 +75,18 @@ def rsi_cycle() -> dict:
     return rsi.run_cycle()
 
 
+@app.post("/api/rsi/burn")
+def rsi_burn(max_cycles: int | None = None) -> dict:
+    """Start the continuous RunPod self-training burner in the background — runs until the
+    RunPod balance is exhausted (or max_cycles cycles)."""
+    from threading import Thread
+
+    from .rsi.runner import run_forever
+
+    Thread(target=run_forever, kwargs={"max_cycles": max_cycles}, daemon=True).start()
+    return {"started": True, "max_cycles": max_cycles, "trainer": bool(settings.rsi_trainer_url)}
+
+
 # RSI-published detector weights (manifest + .onnx) live here.
 app.mount("/models", StaticFiles(directory=MODELS), name="models")
 
