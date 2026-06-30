@@ -31,9 +31,9 @@ export class Detector {
   }
 
   async load() {
-    // YOLO (onnx) is the primary detector; RF-DETR / yolos-tiny are fallbacks.
-    if (await this._tryOnnx()) this.mode = "onnx";
-    else if (await this._tryRfdetr()) this.mode = "rfdetr";
+    // RF-DETR is the primary detector; YOLO11 onnx / yolos-tiny are fallbacks.
+    if (await this._tryRfdetr()) this.mode = "rfdetr";
+    else if (await this._tryOnnx()) this.mode = "onnx";
     else if (await this._tryTransformers()) this.mode = "transformers";
     else this.mode = "mock";
     return this.mode;

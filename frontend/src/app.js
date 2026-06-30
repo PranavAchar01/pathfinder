@@ -31,8 +31,45 @@ let detector, depth, llm;
 const telemetry = new Telemetry();
 let running = false, lastScene = null;
 let lastAlertText = "", lastAlertAt = 0, lastHapticAt = 0;
+let wakeLock = null;
+
+const IS_PHONE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+  (navigator.maxTouchPoints > 1 && matchMedia("(pointer:coarse)").matches);
+const HAS_VIBRATE = typeof navigator.vibrate === "function";
 
 function setStatus(m) { els.status.textContent = m; }
+
+// Mobile browsers block speech + vibration until they fire inside a user gesture. Call this
+// synchronously from the START tap (before any await) to unlock both for the session.
+function unlockOutputs() {
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance("Pathfinder ready");
+    u.rate = 1.1;
+    speechSynthesis.speak(u);            // primes/unlocks TTS within the gesture
+    lastAlertText = "Pathfinder ready"; lastAlertAt = performance.now();
+  } catch (_) {}
+  try { if (HAS_VIBRATE) navigator.vibrate(30); } catch (_) {} // unlocks + confirms haptics
+}
+
+// Keep the screen awake during navigation (re-acquire when tab returns to foreground).
+async function keepAwake() {
+  try { wakeLock = await navigator.wakeLock?.request("screen"); } catch (_) {}
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && running) keepAwake();
+});
+
+function speak(text, { force = false } = {}) {
+  if (!els.speak.checked || !text) return;
+  const now = performance.now();
+  if (!force && text === lastAlertText && now - lastAlertAt < ALERT_REPEAT_MS) return;
+  lastAlertText = text; lastAlertAt = now;
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 1.12;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+}
 
 function speak(text, { force = false } = {}) {
   if (!els.speak.checked || !text) return;
@@ -61,9 +98,10 @@ async function boot() {
     : det === "rfdetr" ? "rf-detr·m"
     : det === "transformers" ? "yolos-tiny"
     : det;
-  setStatus(`${gpu.name} · detect:${detTag} · depth:${dep ? "v2" : "mock"}`);
+  const out = IS_PHONE ? (HAS_VIBRATE ? "phone·haptics+audio" : "phone·audio (no vibrate/iOS)") : "desktop·audio";
+  setStatus(`${gpu.name} · detect:${detTag} · depth:${dep ? "v2" : "mock"} · ${out}`);
   llm.load().then(() => {}); // background, for HOLD TO SPEAK Q&A only
-  els.start.disabled = false; els.start.textContent = "START";
+  els.start.disabled = false; els.start.textContent = IS_PHONE ? "START (enables haptics + audio)" : "START";
 }
 
 async function startCamera() {
@@ -161,10 +199,12 @@ async function tick() {
 }
 
 async function start() {
-  await startCamera();
-  running = true;
+  unlockOutputs();        // MUST run synchronously in the tap gesture to enable phone audio + haptics
   els.start.textContent = "RUNNING…";
   els.start.disabled = true;
+  await startCamera();
+  await keepAwake();
+  running = true;
   tick();
 }
 
