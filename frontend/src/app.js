@@ -3,6 +3,7 @@ import { Depth } from "./depth.js";
 import { LLM } from "./llm.js";
 import { analyze } from "./scene.js";
 import { fire as fireHaptics } from "./haptics.js";
+import { cue as audioCue, unlockAudio } from "./audiocue.js";
 import { identify, Telemetry } from "./rsi.js";
 import { probeWebGPU } from "./webgpu.js";
 
@@ -50,6 +51,7 @@ function unlockOutputs() {
     lastAlertText = "Pathfinder ready"; lastAlertAt = performance.now();
   } catch (_) {}
   try { if (HAS_VIBRATE) navigator.vibrate(30); } catch (_) {} // unlocks + confirms haptics
+  unlockAudio(); // iOS: start the AudioContext for the directional audio cue (haptic substitute)
 }
 
 // Keep the screen awake during navigation (re-acquire when tab returns to foreground).
@@ -98,7 +100,10 @@ async function boot() {
     : det === "rfdetr" ? "rf-detr·m"
     : det === "transformers" ? "yolos-tiny"
     : det;
-  const out = IS_PHONE ? (HAS_VIBRATE ? "phone·haptics+audio" : "phone·audio (no vibrate/iOS)") : "desktop·audio";
+  const native = !!window.Capacitor?.isNativePlatform?.();
+  const out = native ? "native·haptics+audio"
+    : IS_PHONE ? (HAS_VIBRATE ? "phone·haptics+audio" : "iOS·directional-audio+voice")
+    : "desktop·audio";
   setStatus(`${gpu.name} · detect:${detTag} · depth:${dep ? "v2" : "mock"} · ${out}`);
   llm.load().then(() => {}); // background, for HOLD TO SPEAK Q&A only
   els.start.disabled = false; els.start.textContent = IS_PHONE ? "START (enables haptics + audio)" : "START";
@@ -183,7 +188,8 @@ async function tick() {
     els.narration.textContent = scene.announce;
     speak(scene.announce);                                  // RED -> read what's in front
     if (performance.now() - lastHapticAt > HAPTIC_REPEAT_MS) {
-      fireHaptics(scene.packet);                            // RED -> haptics fire
+      const buzzed = fireHaptics(scene.packet);             // RED -> native/Android haptics
+      if (!buzzed) audioCue(scene.packet);                  // iOS web -> directional audio cue
       lastHapticAt = performance.now();
     }
   } else {
