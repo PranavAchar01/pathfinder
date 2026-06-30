@@ -57,7 +57,10 @@ async function boot() {
   }
   setStatus(`WebGPU ✓ ${gpu.name} — loading…`);
   const [det, dep] = await Promise.all([detector.load(), depth.load()]);
-  const detTag = det === "onnx" ? `yolo11(v${detector.version})` : det;
+  const detTag = det === "rfdetr" ? "rf-detr·m"
+    : det === "onnx" ? `yolo11(v${detector.version})`
+    : det === "transformers" ? "yolos-tiny"
+    : det;
   setStatus(`${gpu.name} · detect:${detTag} · depth:${dep ? "v2" : "mock"}`);
   llm.load().then(() => {}); // background, for HOLD TO SPEAK Q&A only
   els.start.disabled = false; els.start.textContent = "START";

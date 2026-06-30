@@ -7,16 +7,20 @@ const COCO_FALLBACK = [
   "bicycle", "car", "dog", "bottle", "backpack", "tv",
 ];
 
-// On-device object detection. Three tiers, chosen at load time:
-//   1. "onnx"         — RSI-trained YOLO11 from /models/manifest.json (onnxruntime-web/WebGPU)
-//   2. "transformers" — Xenova/yolos-tiny from CDN (transformers.js/WebGPU); real detection
-//                       out-of-the-box, no weights to host. Used until RSI publishes an ONNX.
-//   3. "mock"         — random boxes, only if WebGPU is unavailable, so the app still runs.
+// On-device object detection. Tiers, chosen at load time (best available wins):
+//   1. "rfdetr"       — RF-DETR medium (onnx-community, transformers.js/WebGPU): SOTA accuracy,
+//                       NMS-free transformer detector. Primary.
+//   2. "onnx"         — YOLO11 from /models/manifest.json (onnxruntime-web/WebGPU). Fallback.
+//   3. "transformers" — Xenova/yolos-tiny (transformers.js/WebGPU). Secondary fallback.
+//   4. "mock"         — random boxes if WebGPU is unavailable, so the app still runs.
+const TJS = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
+
 export class Detector {
   constructor() {
     this.mode = "mock";
     this.session = null;
     this.tjs = null;
+    this.tjsThreshold = 0.3;
     this.labels = COCO_FALLBACK;
     this.size = 640;
     this.version = 0;
@@ -26,10 +30,25 @@ export class Detector {
   }
 
   async load() {
-    if (await this._tryOnnx()) this.mode = "onnx";
+    if (await this._tryRfdetr()) this.mode = "rfdetr";
+    else if (await this._tryOnnx()) this.mode = "onnx";
     else if (await this._tryTransformers()) this.mode = "transformers";
     else this.mode = "mock";
     return this.mode;
+  }
+
+  async _tryRfdetr() {
+    try {
+      const { pipeline, env } = await import(TJS);
+      env.allowLocalModels = false;
+      this.tjs = await pipeline("object-detection", "onnx-community/rfdetr_medium-ONNX", { device: "webgpu" });
+      this.tjsThreshold = 0.4; // DETR scores are well-calibrated
+      this.labels = [];        // pipeline returns label strings directly
+      return true;
+    } catch (e) {
+      console.warn("[detector] no rf-detr:", e.message);
+      return false;
+    }
   }
 
   async _tryOnnx() {
@@ -54,9 +73,10 @@ export class Detector {
 
   async _tryTransformers() {
     try {
-      const { pipeline, env } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2");
+      const { pipeline, env } = await import(TJS);
       env.allowLocalModels = false;
       this.tjs = await pipeline("object-detection", "Xenova/yolos-tiny", { device: "webgpu" });
+      this.tjsThreshold = 0.3;
       return true;
     } catch (e) {
       console.warn("[detector] no transformers.js:", e.message);
@@ -65,8 +85,8 @@ export class Detector {
   }
 
   async detect(canvas) {
+    if (this.mode === "rfdetr" || this.mode === "transformers") return this._detectTransformers(canvas);
     if (this.mode === "onnx") return this._detectOnnx(canvas);
-    if (this.mode === "transformers") return this._detectTransformers(canvas);
     return this._mock(canvas);
   }
 
@@ -74,7 +94,7 @@ export class Detector {
     const url = canvas.convertToBlob
       ? URL.createObjectURL(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 }))
       : canvas.toDataURL("image/jpeg", 0.7);
-    const res = await this.tjs(url, { threshold: 0.3 });
+    const res = await this.tjs(url, { threshold: this.tjsThreshold });
     if (url.startsWith("blob:")) URL.revokeObjectURL(url);
     return res.map((r) => ({
       label: r.label,
