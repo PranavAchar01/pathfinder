@@ -29,4 +29,4 @@ jobs:
           file: runpod/perception/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/pathfinder-perception:latest
+          tags: ghcr.io/pranavachar01/pathfinder-perception:latest
