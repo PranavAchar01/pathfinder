@@ -3,6 +3,7 @@ import { Depth } from "./depth.js";
 import { LLM } from "./llm.js";
 import { analyze } from "./scene.js";
 import { fire as fireHaptics } from "./haptics.js";
+import { cue as audioCue, unlockAudio } from "./audiocue.js";
 import { identify, Telemetry } from "./rsi.js";
 import { probeWebGPU } from "./webgpu.js";
 
@@ -145,7 +146,8 @@ async function tick() {
     els.narration.textContent = scene.announce;
     speak(scene.announce);                                  // RED -> read what's in front
     if (performance.now() - lastHapticAt > HAPTIC_REPEAT_MS) {
-      fireHaptics(scene.packet);                            // RED -> haptics fire
+      const buzzed = fireHaptics(scene.packet);             // Android: vibration
+      if (!buzzed) audioCue(scene.packet);                  // iPhone (no vibrate): audio buzz
       lastHapticAt = performance.now();
     }
   } else {
@@ -161,6 +163,7 @@ async function tick() {
 }
 
 async function start() {
+  unlockAudio();   // MUST run synchronously in the tap gesture so the iPhone audio buzz works
   await startCamera();
   running = true;
   els.start.textContent = "RUNNING…";
