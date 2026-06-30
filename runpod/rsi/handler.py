@@ -14,14 +14,37 @@ Invoked with {"input": {"task": "finetune", "classes": [...], "images": {label: 
 """
 from __future__ import annotations
 
-import base64
 import os
 import tempfile
 import urllib.request
 
+import requests
 import runpod
 
+# RunPod serverless drops job outputs above a small size limit, so the trained ONNX (tens of
+# MB) can't be returned inline — upload it to a transfer host and return the URL instead.
+_UPLOAD_HOSTS = ["https://0x0.st", "https://tmpfiles.org/api/v1/upload"]
+
 _UA = {"User-Agent": "Mozilla/5.0 (PathfinderRSI)"}
+
+
+def _upload(path: str) -> str:
+    for host in _UPLOAD_HOSTS:
+        try:
+            with open(path, "rb") as fh:
+                r = requests.post(host, files={"file": fh}, headers=_UA, timeout=120)
+            r.raise_for_status()
+            text = r.text.strip()
+            if host.endswith("0x0.st") and text.startswith("http"):
+                return text
+            if "tmpfiles" in host:
+                # tmpfiles returns {"data":{"url":"https://tmpfiles.org/<id>"}}; the direct
+                # file is at /dl/<id>.
+                u = r.json()["data"]["url"]
+                return u.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+        except Exception:  # noqa: BLE001
+            continue
+    return ""
 
 
 def _download(url: str, dest: str) -> bool:
@@ -91,18 +114,18 @@ def _finetune(inp: dict) -> dict:
     base.train(data=data_yaml, epochs=epochs, imgsz=imgsz, batch=8, verbose=False,
                project=work, name="rsi", exist_ok=True)
 
-    # 4. Export ONNX and return it so the backend can publish to /models.
+    # 4. Export ONNX and upload it (too large to return inline) for the backend to publish.
     onnx_path = base.export(format="onnx", opset=12, dynamic=False, simplify=True)
-    with open(onnx_path, "rb") as fh:
-        onnx_b64 = base64.b64encode(fh.read()).decode()
+    weights_url = _upload(onnx_path)
 
     return {
-        "status": "completed",
+        "status": "completed" if weights_url else "trained_no_upload",
         "classes": classes,
         "downloaded": len(local),
         "labeled_boxes": kept,
         "epochs": epochs,
-        "weights_onnx_b64": onnx_b64,
+        "weights_onnx_url": weights_url,
+        "onnx_bytes": os.path.getsize(onnx_path),
         "labels": [names[i] for i in sorted(names)],
         "input_size": imgsz,
     }

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import time
@@ -135,10 +134,12 @@ class RSILoop:
         return {"status": "TIMEOUT", "id": job_id}
 
     def _publish_weights(self, output: dict) -> bool:
-        b64 = output.get("weights_onnx_b64")
-        if not b64:
+        url = output.get("weights_onnx_url")
+        if not url:
             return False
-        (self.models_dir / "detector.onnx").write_bytes(base64.b64decode(b64))
+        resp = httpx.get(url, timeout=120, follow_redirects=True)
+        resp.raise_for_status()
+        (self.models_dir / "detector.onnx").write_bytes(resp.content)
         manifest_path = self.models_dir / "manifest.json"
         try:
             manifest = json.loads(manifest_path.read_text())
