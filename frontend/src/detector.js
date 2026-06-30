@@ -41,7 +41,7 @@ export class Detector {
     try {
       const { pipeline, env } = await import(TJS);
       env.allowLocalModels = false;
-      this.tjs = await pipeline("object-detection", "onnx-community/rfdetr_medium-ONNX", { device: "webgpu" });
+      this.tjs = await pipeline("object-detection", "onnx-community/rfdetr_medium-ONNX", { device: "webgpu", dtype: "fp16" });
       this.tjsThreshold = 0.4; // DETR scores are well-calibrated
       this.labels = [];        // pipeline returns label strings directly
       return true;

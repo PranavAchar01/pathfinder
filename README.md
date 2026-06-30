@@ -6,7 +6,7 @@ A wearable navigation aid for blind and low-vision users — **web only, edge-fi
 You mount a phone on your chest, open the web app, and **everything in the real-time loop
 runs on the device, in the browser**, for the lowest possible latency:
 
-- **camera** → **YOLO** object detection (onnxruntime-web, WebGPU)
+- **camera** → object detection: **RF-DETR** (medium, transformers.js/WebGPU, NMS-free, SOTA accuracy) with **YOLO11m** (onnxruntime-web) as automatic fallback
 - → **monocular depth** (Depth Anything V2, transformers.js, WebGPU) → per-object distance
 - → **direction reasoning + conversation** by **Qwen** running fully in-browser (**WebLLM**, WebGPU)
 - → **haptics**: the phone buzzes via the **Web Vibration API** as you near collision
