@@ -1,60 +1,48 @@
-# RunPod hosting
+# RunPod — RSI training only
 
-All heavy compute runs on RunPod serverless. Both endpoints use `workersMin=0`, so they
-**scale to zero and cost nothing when idle** — billing only accrues while a request is
-being served.
+The LLM, detection, and depth all run on the **edge** (browser/WebGPU). RunPod's only job
+is the heavy, periodic **Recursive Self-Improvement** training of the detector. The
+endpoint is serverless with `workersMin=0`, so it **costs nothing when idle** — billing
+accrues only while a fine-tune job runs.
 
-## Live resources
+## Live resource
 
-| Resource | Type | ID | OpenAI / invoke URL |
-|---|---|---|---|
-| `pathfinder-qwen` | Serverless (vLLM) | `7gyxvsvtfeiqkm` | `https://api.runpod.ai/v2/7gyxvsvtfeiqkm/openai/v1` |
-| `pathfinder-perception` | Serverless (custom) | `f1jndtovwo2rjs` | `https://api.runpod.ai/v2/f1jndtovwo2rjs/runsync` |
+| Resource | ID | Invoke URL |
+|---|---|---|
+| `pathfinder-rsi` (serverless GPU trainer) | `f1jndtovwo2rjs` | `https://api.runpod.ai/v2/f1jndtovwo2rjs/runsync` |
+| Template `pathfinder-rsi` (`ghcr.io/pranavachar01/pathfinder-rsi:latest`) | `gim5kgbqcu` | — |
 
-| Template | ID |
-|---|---|
-| `pathfinder-qwen` (`runpod/worker-v1-vllm:v2.22.5`, `Qwen/Qwen2.5-0.5B-Instruct`) | `u830yqh4ih` |
-| `pathfinder-perception` (`ghcr.io/<owner>/pathfinder-perception:latest`) | `gim5kgbqcu` |
+GPU pool (priority): **RTX 4090** → L40S → RTX A5000, 1 GPU, flashboot on.
 
-GPU pool for both (priority order): **RTX 4090** → L40S → RTX A5000, 1 GPU, flashboot on.
-The 4090 is well-supported by the vLLM worker (no Blackwell/CUDA-compat risk) and is
-broadly available, so workers schedule reliably for real-time use.
-
-## Qwen — ready now
-
-`backend/.env` already points at it:
+`backend/.env` is wired:
 
 ```
-PATHFINDER_REASONING_BACKEND=runpod
-PATHFINDER_RUNPOD_QWEN_BASE_URL=https://api.runpod.ai/v2/7gyxvsvtfeiqkm/openai/v1
-PATHFINDER_RUNPOD_QWEN_MODEL=Qwen/Qwen2.5-0.5B-Instruct
+PATHFINDER_RUNPOD_API_KEY=...
+PATHFINDER_RSI_TRAINER_URL=https://api.runpod.ai/v2/f1jndtovwo2rjs/runsync
 ```
 
-Model is `Qwen2.5-0.5B-Instruct` (~0.9 GB), chosen so cold start and inference stay fast.
-First request downloads weights (~30-60 s), then warm.
+## How RSI uses it
 
-## Perception — one step to activate
+The backend `RSILoop` submits `{"input":{"task":"finetune","classes":[...],"shards":[...]}}`
+to the trainer when edge telemetry shows weak classes. `runpod/rsi/handler.py` fine-tunes
+YOLOv8 on the Bright-Data-harvested shards and exports ONNX, which is published back to the
+backend `/models` manifest for the edge to pull.
 
-The endpoint exists but pulls `ghcr.io/<owner>/pathfinder-perception:latest`, which is
-published by GitHub Actions ([`.github/workflows/perception-image.yml`](.github/workflows/perception-image.yml))
-on push to `main`. To go live:
+## One step to activate the trainer image
 
-1. Push to GitHub → Actions builds and pushes the image (native amd64).
-2. Make the ghcr package public (once, so RunPod can pull without registry auth):
-   GitHub → your profile → Packages → `pathfinder-perception` → Package settings →
-   Change visibility → Public.  *(Or keep it private and add a RunPod container-registry
-   credential.)*
-3. Flip the backend:
-   ```
-   PATHFINDER_PERCEPTION_BACKEND=runpod
-   ```
-   (`PATHFINDER_RUNPOD_PERCEPTION_URL` is already set.)
+The endpoint pulls `ghcr.io/pranavachar01/pathfinder-rsi:latest`, built by GitHub Actions
+([`.github/workflows/rsi-image.yml`](.github/workflows/rsi-image.yml)) on push to `main`.
+After the first build:
 
-The same endpoint also serves the RSI `finetune` task, so self-improvement retrains on the
-GPU that hosts detection.
+1. Make the ghcr package **public** (GitHub → Packages → `pathfinder-rsi` → settings →
+   visibility), so RunPod can pull it without registry auth. *(Or add a RunPod
+   container-registry credential.)*
 
-## Recreate / manage
+Until the image is published the endpoint stays idle (no cost); the RSI loop logs
+`queued_local` and still harvests data, so nothing breaks.
 
-Endpoints and templates were created via the RunPod REST API (`https://rest.runpod.io/v1`).
-The `runpod` MCP server is also registered (user scope) and will be available in new
-Claude Code sessions for managing these resources conversationally.
+## Managing it
+
+Resources were created via the RunPod REST API (`https://rest.runpod.io/v1`). The `runpod`
+MCP server is registered (user scope) for conversational management in new Claude Code
+sessions.

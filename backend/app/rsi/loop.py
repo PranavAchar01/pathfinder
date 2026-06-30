@@ -10,37 +10,42 @@ import httpx
 
 from ..brightdata.ingest import TrainingDataIngestor
 from ..config import get_settings
-from ..schemas import Scene
+from ..schemas import TelemetryItem
 from .evaluator import Evaluator, WeaknessReport
 
 log = logging.getLogger("pathfinder.rsi")
 
 
 class RSILoop:
-    """Recursive self-improvement.
+    """Recursive self-improvement, driven by edge telemetry.
 
-    Observes live perception, periodically evaluates where the models are weak,
-    uses Bright Data to harvest training data for those classes, and triggers a
-    retraining/threshold-adaptation job on RunPod. Each cycle is logged so the
-    system's competence is auditable over time.
+    The edge device runs detection in real time and posts the classes it was unsure about.
+    This loop accumulates that signal, finds the weak classes, uses Bright Data to harvest
+    training data for them, and submits a fine-tune job to the RunPod GPU trainer. The
+    trainer exports new detector weights that the edge then pulls — closing the loop.
     """
 
     def __init__(self) -> None:
         self.settings = get_settings()
         self.evaluator = Evaluator()
         self.ingestor = TrainingDataIngestor()
-        self._buffer: deque[Scene] = deque(maxlen=self.settings.rsi_review_every)
+        self._buffer: deque[TelemetryItem] = deque(maxlen=max(self.settings.rsi_review_every * 4, 200))
         self._seen = 0
         self.ledger = Path(self.settings.rsi_data_dir) / "rsi_ledger.jsonl"
         self.ledger.parent.mkdir(parents=True, exist_ok=True)
 
-    def observe(self, scene: Scene) -> None:
-        if not self.settings.rsi_enabled:
-            return
-        self._buffer.append(scene)
-        self._seen += 1
-        if self._seen % self.settings.rsi_review_every == 0:
-            self.run_cycle()
+    def ingest(self, items: list[TelemetryItem]) -> dict:
+        if not self.settings.rsi_enabled or not items:
+            return {"ingested": 0, "triggered": False}
+        self._buffer.extend(items)
+        self._seen += len(items)
+        triggered = False
+        cycle = None
+        if self._seen >= self.settings.rsi_review_every:
+            self._seen = 0
+            cycle = self.run_cycle()
+            triggered = cycle.get("job") is not None
+        return {"ingested": len(items), "triggered": triggered, "cycle": cycle}
 
     def run_cycle(self) -> dict:
         report = self.evaluator.evaluate(list(self._buffer))
@@ -59,18 +64,18 @@ class RSILoop:
         return cycle
 
     def _trigger_finetune(self, report: WeaknessReport, harvested: list[dict]) -> dict:
-        """Kick a RunPod training job on the freshly harvested data."""
+        """Submit a YOLO fine-tune job to the RunPod GPU trainer."""
         spec = {
             "task": "finetune",
             "target": "yolo",
             "classes": report.weak_labels,
             "shards": [h["shard"] for h in harvested],
         }
-        if not (self.settings.runpod_perception_url and self.settings.runpod_api_key):
+        if not (self.settings.rsi_trainer_url and self.settings.runpod_api_key):
             return {"status": "queued_local", "spec": spec}
         try:
             resp = httpx.post(
-                self.settings.runpod_perception_url,
+                self.settings.rsi_trainer_url,
                 headers={"Authorization": f"Bearer {self.settings.runpod_api_key}"},
                 json={"input": spec},
                 timeout=30,

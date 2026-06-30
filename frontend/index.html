@@ -11,17 +11,18 @@
     <video id="cam" playsinline autoplay muted></video>
     <canvas id="overlay"></canvas>
     <div id="risk" class="clear">CLEAR</div>
+    <div id="status">starting…</div>
     <div id="narration" aria-live="polite"></div>
   </div>
 
   <div id="controls">
-    <button id="start" class="primary">Start navigation</button>
+    <button id="start" class="primary" disabled>Loading…</button>
     <button id="talk">🎤 Hold to ask</button>
-    <label class="toggle"><input type="checkbox" id="speak" checked /> Speak guidance</label>
+    <label class="toggle"><input type="checkbox" id="speak" checked /> Speak</label>
   </div>
 
   <div id="reply" aria-live="polite"></div>
 
-  <script src="/app/app.js"></script>
+  <script type="module" src="/app/src/app.js"></script>
 </body>
 </html>

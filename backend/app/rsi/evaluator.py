@@ -4,7 +4,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from ..config import get_settings
-from ..schemas import Scene
+from ..schemas import TelemetryItem
 
 
 @dataclass
@@ -20,21 +20,20 @@ class WeaknessReport:
 
 
 class Evaluator:
-    """Scores recent perception to find classes the system is weak on."""
+    """Scores edge telemetry to find classes the on-device detector is weak on."""
 
     def __init__(self) -> None:
         self.settings = get_settings()
 
-    def evaluate(self, scenes: list[Scene]) -> WeaknessReport:
-        report = WeaknessReport(samples=len(scenes))
+    def evaluate(self, items: list[TelemetryItem]) -> WeaknessReport:
+        report = WeaknessReport(samples=len(items))
         weak: Counter[str] = Counter()
-        for scene in scenes:
-            for obj in scene.objects:
-                if not obj.known:
-                    report.unknown_count += 1
-                    weak[obj.label] += 1
-                elif obj.confidence < self.settings.rsi_min_confidence:
-                    report.low_conf_count += 1
-                    weak[obj.label] += 1
+        for it in items:
+            if not it.known:
+                report.unknown_count += 1
+                weak[it.label] += 1
+            elif it.confidence < self.settings.rsi_min_confidence:
+                report.low_conf_count += 1
+                weak[it.label] += 1
         report.weak_labels = [label for label, _ in weak.most_common(10)]
         return report

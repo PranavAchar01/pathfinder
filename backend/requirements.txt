@@ -3,11 +3,7 @@ uvicorn[standard]==0.34.0
 pydantic==2.10.4
 pydantic-settings==2.7.1
 httpx==0.28.1
-numpy==2.2.1
-pillow==11.1.0
-websockets==14.1
 
-# Optional, only needed when PATHFINDER_PERCEPTION_BACKEND=local:
-#   ultralytics==8.3.55
-#   torch
-#   transformers==4.48.0
+# Perception, depth, and the LLM all run on the edge (browser/WebGPU) now, so the backend
+# stays light: it serves the app, does Bright Data lookups, and orchestrates RSI.
+# The RSI GPU trainer's deps live in runpod/rsi/Dockerfile, not here.

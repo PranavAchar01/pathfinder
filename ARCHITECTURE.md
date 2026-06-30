@@ -1,80 +1,74 @@
 # Architecture
 
-## Components
+## Principle: edge-first, GPU-for-training-only
 
-| Layer | Where it runs | Responsibility |
+Everything in the real-time loop runs **in the phone's browser** over WebGPU, so there is
+no per-frame network latency. The cloud GPU (RunPod) is reserved for the one genuinely
+heavy, infrequent job: **retraining the detector (RSI)**.
+
+| Layer | Where | Responsibility |
 |---|---|---|
-| Web app (edge) | Phone browser | Camera capture, frame streaming, haptics, voice I/O, overlay |
-| Backend | Anywhere hostable (laptop, VM, container) | Orchestration, collision logic, RSI, API/WS |
-| Perception | RunPod GPU (or local) | YOLO detection + monocular depth |
-| Reasoning | RunPod GPU (Qwen via vLLM) | Direction guidance + conversation |
-| Web data | Bright Data | Object identification + training-data harvest |
+| Edge | Phone browser (WebGPU) | Camera, YOLO detection, depth, fusion, collision, haptics, LLM (direction + chat), voice |
+| Backend | Anywhere hostable | Serve the app, Bright Data lookups, RSI orchestration, publish detector weights |
+| GPU | RunPod serverless | RSI fine-tune jobs only — no LLM, no per-frame inference |
+| Web data | Bright Data | Identify unknown objects + harvest training data |
 
-There is **no native app and no microcontroller**. The "edge device" is a phone running a
-web page; haptics use the Web Vibration API, so directionality is conveyed through pulse
-*intensity and pattern* rather than separate left/right motors. The backend still computes
-per-side intensities (`HapticCommand.left/center/right`) so a directional belt could be
-added later without backend changes.
+## Edge real-time loop (`frontend/src/app.js`, ~4 fps)
 
-## Real-time navigation loop
+1. Draw the camera frame to a 480×360 processing canvas.
+2. In parallel: `Detector.detect` (YOLOv8 ONNX via onnxruntime-web/WebGPU) and
+   `Depth.estimate` (Depth Anything V2 via transformers.js/WebGPU).
+3. `fuse()` samples the nearest-15th-percentile depth inside each detection box →
+   `distance_m`, and maps box center-x → `side` (left/center/right) + `clock` (9=hard left,
+   12=ahead, 3=hard right).
+4. `assess()` → `risk` (clear/caution/stop) + a `HapticCommand`; intensity ramps from the
+   warn threshold (2 m) to the stop threshold (1 m), pattern escalates. `vibrate()` fires
+   `navigator.vibrate(...)`.
+5. Throttled (~1.5 s) `LLM.guide()` — **Qwen via WebLLM** turns the object geometry into one
+   short spoken cue; falls back to a deterministic phrase if WebGPU/LLM is unavailable.
 
-1. `frontend/app.js` grabs a 320×240 JPEG from the rear camera ~4×/sec and sends it over
-   `WS /ws/navigate`.
-2. `pipeline.NavigationPipeline.process`:
-   - `Detector.detect` → list of `Detection` (label, confidence, bbox) — YOLO.
-   - `DepthEstimator.estimate` → per-pixel meters — depth model.
-   - `fusion.fuse` → `SceneObject`s: samples the nearest decile of each bbox's depth for
-     `distance_m`, and maps bbox center-x to `side` (left/center/right) and a `clock`
-     position (9 = hard left, 12 = ahead, 3 = hard right).
-   - `collision.assess` → `risk` (clear/caution/stop) + `HapticCommand`. Intensity ramps
-     linearly from the warn threshold (2 m) to the stop threshold (1 m); pattern escalates.
-   - `DirectionReasoner.guide` → **Qwen** receives the object geometry and returns one
-     short spoken cue plus which object is the priority. Falls back to a deterministic
-     phrase if Qwen is unavailable.
-3. The `Scene` (objects + risk + haptic + narration) is returned; the browser draws the
-   overlay, calls `navigator.vibrate(...)`, and speaks the narration when not "clear".
+No backend call is on this path. Detection/depth/LLM each degrade to a mock implementation
+if their model or WebGPU is missing, so the loop always produces output.
 
-## Conversation + unknown-object lookup
+## Conversation + unknown-object identification
 
-`POST /api/chat` carries the user's utterance plus the latest `Scene`.
-`ConversationAgent`:
+Hold-to-talk → Web Speech API transcript → `app.ask()`:
 
-- grounds answers in the live scene ("there's a chair 1.5 m to your right"),
-- decides a **web lookup** is needed when the user asks "what is this / identify…" or when
-  the scene contains a low-confidence ("unknown") object,
-- calls `BrightDataSearch` (SERP API) and feeds the snippets to Qwen for a grounded,
-  hazard-aware explanation.
-
-The browser does speech-to-text (Web Speech API) and text-to-speech locally; only text
-crosses the wire.
+- If the user asks "what is this / identify…", or the scene contains a low-confidence
+  ("unknown") object, the edge calls the backend **`/api/identify`**, which queries
+  **Bright Data** (the API key must stay server-side) and returns snippets.
+- `LLM.chat()` (WebLLM) answers in 1–3 sentences, grounded in the live scene and any web
+  snippets, then the browser speaks it.
 
 ## Recursive Self-Improvement (RSI)
 
-`rsi.RSILoop` observes every `Scene`. Every `RSI_REVIEW_EVERY` frames it runs a cycle:
+1. The edge `Telemetry` buffer records every weak/unknown detection and POSTs batches to
+   **`/api/rsi/telemetry`**.
+2. Backend `RSILoop` accumulates them; every `RSI_REVIEW_EVERY` items `Evaluator` finds the
+   weak classes.
+3. `TrainingDataIngestor` uses **Bright Data** to harvest reference data for those classes
+   into `data/harvest/<label>.jsonl`.
+4. `_trigger_finetune` submits `{"task":"finetune", classes, shards}` to the **RunPod** RSI
+   endpoint (`runpod/rsi/handler.py`), which fine-tunes YOLOv8 on the GPU and exports ONNX.
+5. The new weights + `manifest.json` are published under the backend's **`/models`**; the
+   edge `Detector` reads the manifest on load and runs the improved model. Every cycle is
+   appended to `data/rsi_ledger.jsonl`.
 
-1. `Evaluator` scans the buffer for **weak classes** — unknown labels and detections below
-   `RSI_MIN_CONFIDENCE`.
-2. For each weak class, `TrainingDataIngestor` uses **Bright Data** to harvest reference
-   imagery + descriptions into `data/harvest/<label>.jsonl`.
-3. `_trigger_finetune` submits a `{"task": "finetune", ...}` job to the **RunPod**
-   perception endpoint — the same GPU that serves detection retrains on the new shards and
-   publishes updated weights.
-4. Every cycle is appended to `data/rsi_ledger.jsonl` for auditability.
+This closes the loop: the device's field blind-spots drive what the GPU trains next.
 
-This closes the loop: the system's blind spots in the field directly drive what it learns
-next, without manual labeling.
+## Why this split
 
-## Backend selection
-
-`config.Settings` has `perception_backend` and `reasoning_backend`, each `mock | local |
-runpod`. Every client (`Detector`, `DepthEstimator`, `QwenClient`, `BrightDataSearch`)
-checks its backend at call time, so a single env flip moves a capability from mock → cloud
-with no code change. This is what lets the whole system run on a laptop for development and
-demo, then run entirely on RunPod in production.
+- **Latency:** obstacle→haptic must be tens of ms; a cloud round-trip per frame can't meet
+  that. On-device WebGPU can.
+- **Cost/availability:** GPUs are expensive and contended. Using them only for periodic RSI
+  training (not per-frame) keeps spend near zero and removes the real-time dependency on GPU
+  availability.
+- **Privacy:** the camera stream never leaves the device; only anonymized weak-class
+  telemetry and explicit "what is this?" queries hit the network.
 
 ## Safety notes
 
-- Mock depth is a floor-plane heuristic — **not** a real distance. Never rely on mock mode
+- Mock depth is a floor-plane heuristic — **not** real distance. Never rely on mock mode
   for actual navigation.
-- Collision thresholds are conservative defaults; tune `COLLISION_WARN_M` / `STOP_M` per
-  user gait and phone mounting height.
+- Collision thresholds are conservative defaults served from the backend
+  (`/api/config`); tune `COLLISION_WARN_M` / `STOP_M` per user gait and mount height.

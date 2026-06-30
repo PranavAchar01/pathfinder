@@ -1,88 +1,83 @@
 # Pathfinder
 
-A wearable navigation aid for blind and low-vision users — **web only, no hardware**.
-You mount a phone on your chest, open the web app in the browser, and Pathfinder:
+A wearable navigation aid for blind and low-vision users — **web only, edge-first**.
+You mount a phone on your chest, open the web app, and **everything in the real-time loop
+runs on the device, in the browser**, for the lowest possible latency:
 
-- **sees** the world through the phone camera,
-- **detects** objects (YOLO) and **estimates distance** (monocular depth model),
-- **reasons** about *which direction* each obstacle is, using **Qwen**,
-- **buzzes** the phone via the **Web Vibration API** as you approach collision distance
-  (left / center / right intensity maps to where the obstacle is),
-- **talks** with you — ask "what's around me?" and it answers from the live scene,
-- **looks things up** — ask about an unfamiliar object and it searches the web via
-  **Bright Data**, then explains what it is and whether it's a hazard,
-- **improves itself** — a **Recursive Self-Improvement (RSI)** loop finds the classes it's
-  weak on, harvests training data with Bright Data, and retrains on RunPod.
+- **camera** → **YOLO** object detection (onnxruntime-web, WebGPU)
+- → **monocular depth** (Depth Anything V2, transformers.js, WebGPU) → per-object distance
+- → **direction reasoning + conversation** by **Qwen** running fully in-browser (**WebLLM**, WebGPU)
+- → **haptics**: the phone buzzes via the **Web Vibration API** as you near collision
+  (left/center/right intensity + escalating pattern encode where the obstacle is)
+- → **voice**: ask "what's around me?" and it answers from the live scene (Web Speech API)
 
-All heavy compute (YOLO, depth, Qwen) runs on **RunPod**. The backend is a single
-hostable FastAPI service that also serves the web app. It runs end-to-end **with no GPU
-and no API keys** in mock mode, so you can demo the full flow on a laptop.
+The **GPU cloud (RunPod) is used only for the heavy lifting: Recursive Self-Improvement
+(RSI) training of the detector** — not for any per-frame inference. The edge reports the
+classes it was unsure about; the backend harvests training data for them via **Bright
+Data** and submits a fine-tune job to RunPod; the trainer publishes new detector weights
+that the edge pulls. Bright Data also powers live **web identification** of unfamiliar
+objects.
 
 ```
-phone browser ──frames(WS)──▶ backend ──▶ YOLO + depth (RunPod) ──▶ fusion (distance, side)
-   ▲  ▲                          │                                      │
-   │  └──haptic + narration──────┘            Qwen (RunPod) ◀──direction reasoning
-   │                                              │
-   └──voice Q&A──/api/chat──▶ conversation ◀──────┘──▶ Bright Data (web lookup)
-                                                  │
-                                       RSI loop ──┴──▶ Bright Data (harvest) ──▶ RunPod (retrain)
+            ┌──────────────────────── PHONE BROWSER (edge, real-time) ───────────────────────┐
+ camera ──▶ │  YOLO (WebGPU) ─┐                                                                │
+            │  depth (WebGPU) ─┴▶ fuse ─▶ collision ─▶ haptics                                 │
+            │  Qwen / WebLLM (WebGPU) ─▶ direction + chat (voice)                              │
+            └───────┬───────────────────────────────────────────────────┬────────────────────┘
+                    │ weak/unknown telemetry                              │ "what is this?"
+                    ▼                                                     ▼
+              backend (hostable) ── Bright Data harvest ──▶ RunPod GPU (RSI training only)
+                    ▲                                                     │
+                    └──────────────── new detector weights (/models) ◀────┘
 ```
 
-## Quick start (mock mode, no keys)
+Design principle: **runs with zero keys/GPU**. No model published yet or no WebGPU? The
+edge falls back to mock detection and a mock LLM so the whole flow still demos.
+
+## Quick start
 
 ```bash
 cd pathfinder
 ./scripts/run_local.sh
 ```
 
-Open `http://localhost:8000` on your laptop, or `http://<your-laptop-ip>:8000` on a phone
-on the same Wi-Fi (camera + vibration need a real device). Tap **Start navigation**.
+Open `http://localhost:8000` on a desktop with WebGPU (Chrome), or
+`http://<your-laptop-ip>:8000` on an Android Chrome phone on the same Wi-Fi. Tap **Start
+navigation**. The first load downloads the in-browser models (LLM ~0.9 GB, cached after).
 
-> Camera and `navigator.vibrate` require a **secure context**. `localhost` is fine; over a
-> LAN IP use an HTTPS tunnel (e.g. `cloudflared`/`ngrok`). iOS Safari does not implement
-> the Vibration API — narration still works; haptics require Android/Chromium.
+> **Requirements:** WebGPU (Chrome/Edge desktop, Chrome on Android) for real models; other
+> browsers get the mock fallback. Camera + `navigator.vibrate` need a secure context —
+> `localhost` is fine; over a LAN IP use an HTTPS tunnel (cloudflared/ngrok). iOS Safari
+> has no Vibration API (narration still works).
 
-Run the tests:
-
-```bash
-source backend/.venv/bin/activate && pytest tests/ -q
-```
+Tests: `source backend/.venv/bin/activate && pytest tests/ -q`
 
 ## Going live
 
-Set these in `backend/.env` (copied from [`.env.example`](.env.example)) and the matching
-backend flips from mock to real:
-
-| Capability | Env | Provider |
+| Capability | Where | How to enable |
 |---|---|---|
-| Direction + chat | `PATHFINDER_REASONING_BACKEND=runpod` + `RUNPOD_*` | RunPod (Qwen/vLLM) |
-| Detection + depth | `PATHFINDER_PERCEPTION_BACKEND=runpod` + `RUNPOD_PERCEPTION_URL` | RunPod |
-| Web lookup + RSI harvest | `PATHFINDER_BRIGHTDATA_API_KEY` | Bright Data |
-
-Deployment details: [`runpod/README.md`](runpod/README.md). You can also run perception
-locally on a GPU box with `PATHFINDER_PERCEPTION_BACKEND=local` (needs `ultralytics`,
-`torch`, `transformers`).
+| LLM (direction + chat) | **Edge** (WebLLM) | on by default; needs WebGPU |
+| Detection + depth | **Edge** (WebGPU) | depth works out-of-box; detection uses `backend/models/detector.onnx` — run `scripts/export_detector.py` (else mock) |
+| Web identification | Backend → Bright Data | set `PATHFINDER_BRIGHTDATA_API_KEY` |
+| RSI training | RunPod GPU | set `PATHFINDER_RUNPOD_API_KEY` + `PATHFINDER_RSI_TRAINER_URL` (see [RUNPOD.md](RUNPOD.md)) |
 
 ## Host the backend
 
 ```bash
-docker compose up --build      # serves API + web app on :8000
+docker compose up --build      # serves the web app + APIs on :8000
 ```
 
-The container is the whole deployable: stateless except the `data/` volume (RSI ledger +
-harvested training shards).
+Stateless except the `data/` volume (RSI ledger + harvested shards) and `backend/models/`
+(published detector weights).
 
 ## Layout
 
 ```
-backend/app/
-  perception/   detector.py (YOLO)  depth.py (depth)  fusion.py (distance + side + clock)
-  reasoning/    qwen_client.py  direction.py (Qwen direction)  conversation.py (voice Q&A)
-  brightdata/   client.py (web search)  ingest.py (training-data harvest)
-  rsi/          loop.py (self-improvement)  evaluator.py (weakness detection)
-  collision.py  pipeline.py  main.py (FastAPI + WS + static)
-frontend/       index.html  app.js (camera, WS, vibrate, voice)  styles.css
-runpod/         qwen/  perception/   (Dockerfiles + serverless handlers)
+frontend/src/   detector.js (YOLO/WebGPU)  depth.js (WebGPU)  llm.js (WebLLM)
+                fusion.js  collision.js  rsi.js (telemetry+identify)  app.js (loop, voice, haptics)
+backend/app/    main.py (serve + APIs)  brightdata/ (search+harvest)  rsi/ (loop+evaluator)  config.py
+runpod/rsi/     handler.py + Dockerfile  (GPU fine-tune job, published to ghcr via CI)
+backend/models/ manifest.json (+ detector.onnx, RSI-published)
 ```
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full data flow and design decisions.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full data flow.

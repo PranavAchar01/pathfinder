@@ -49,6 +49,19 @@ body {
 
 @keyframes pulse { 50% { opacity: 0.4; } }
 
+#status {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 12px) + 40px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.5);
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+
 #narration {
   position: absolute;
   bottom: 12px;

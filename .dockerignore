@@ -1,0 +1,13 @@
+**/.env
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.git
+data/harvest
+data/rsi_ledger.jsonl
+backend/models/*.onnx
+*.pt
+node_modules
+.DS_Store

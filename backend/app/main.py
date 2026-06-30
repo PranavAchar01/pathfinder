@@ -3,59 +3,81 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .brightdata.client import BrightDataSearch
 from .config import get_settings
-from .pipeline import NavigationPipeline
-from .reasoning.conversation import ConversationAgent
-from .schemas import ChatRequest, ChatResponse, FrameMessage
+from .rsi.loop import RSILoop
+from .schemas import (
+    EdgeConfig,
+    IdentifyRequest,
+    IdentifyResponse,
+    IdentifyResult,
+    TelemetryBatch,
+)
 
 logging.basicConfig(level=logging.INFO)
 
 settings = get_settings()
-app = FastAPI(title="Pathfinder", version="0.1.0")
+app = FastAPI(title="Pathfinder", version="0.2.0")
 
-pipeline = NavigationPipeline()
-agent = ConversationAgent()
+search = BrightDataSearch()
+rsi = RSILoop()
 
-FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
+ROOT = Path(__file__).resolve().parents[2]
+FRONTEND = ROOT / "frontend"
+MODELS = ROOT / "backend" / "models"
+MODELS.mkdir(parents=True, exist_ok=True)
 
 
 @app.get("/health")
 def health() -> dict:
     return {
         "status": "ok",
-        "perception_backend": settings.perception_backend,
-        "reasoning_backend": settings.reasoning_backend,
+        "edge_llm": settings.llm_model,
+        "brightdata": bool(settings.brightdata_api_key),
+        "rsi_trainer": bool(settings.rsi_trainer_url),
         "rsi_enabled": settings.rsi_enabled,
     }
 
 
-@app.post("/api/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
-    return agent.respond(req)
+@app.get("/api/config", response_model=EdgeConfig)
+def edge_config() -> EdgeConfig:
+    return EdgeConfig(
+        llm_model=settings.llm_model,
+        collision_warn_m=settings.collision_warn_m,
+        collision_stop_m=settings.collision_stop_m,
+        rsi_enabled=settings.rsi_enabled,
+    )
+
+
+@app.post("/api/identify", response_model=IdentifyResponse)
+def identify(req: IdentifyRequest) -> IdentifyResponse:
+    """Web lookup for an object the on-device models can't name. The edge LLM grounds its
+    spoken answer on these results."""
+    query = req.query if not req.label_guess else f"{req.query} {req.label_guess}"
+    results = search.search(query, limit=3)
+    return IdentifyResponse(
+        query=query,
+        results=[IdentifyResult(title=r.title, url=r.url, snippet=r.snippet) for r in results],
+        used_web=search.live,
+    )
+
+
+@app.post("/api/rsi/telemetry")
+def rsi_telemetry(batch: TelemetryBatch) -> dict:
+    return rsi.ingest(batch.items)
 
 
 @app.post("/api/rsi/cycle")
 def rsi_cycle() -> dict:
-    return pipeline.rsi.run_cycle()
+    return rsi.run_cycle()
 
 
-@app.websocket("/ws/navigate")
-async def navigate(ws: WebSocket) -> None:
-    """Browser streams camera frames; server returns scene + haptic + narration."""
-    await ws.accept()
-    try:
-        while True:
-            raw = await ws.receive_json()
-            msg = FrameMessage(**raw)
-            scene = pipeline.process(msg.image, frame_id=msg.frame_id)
-            await ws.send_json(scene.model_dump())
-    except WebSocketDisconnect:
-        logging.info("navigation client disconnected")
-
+# RSI-published detector weights (manifest + .onnx) live here.
+app.mount("/models", StaticFiles(directory=MODELS), name="models")
 
 if FRONTEND.is_dir():
     app.mount("/app", StaticFiles(directory=FRONTEND, html=True), name="frontend")

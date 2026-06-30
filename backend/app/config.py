@@ -1,43 +1,32 @@
 from functools import lru_cache
-from typing import Literal
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-Backend = Literal["mock", "local", "runpod"]
+_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"  # backend/.env, regardless of CWD
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="PATHFINDER_", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, env_prefix="PATHFINDER_", extra="ignore")
 
-    # Where perception (YOLO + depth) runs. "mock" needs no GPU or keys.
-    perception_backend: Backend = "mock"
-    # Where Qwen runs. "runpod" points at a vLLM OpenAI-compatible endpoint.
-    reasoning_backend: Backend = "mock"
-
-    # RunPod-hosted Qwen (vLLM exposes an OpenAI-compatible API).
-    runpod_qwen_base_url: str = "https://api.runpod.ai/v2/<endpoint-id>/openai/v1"
-    runpod_qwen_model: str = "Qwen/Qwen2.5-0.5B-Instruct"
-    runpod_api_key: str = ""
-
-    # RunPod-hosted perception endpoint (serverless handler in runpod/perception).
-    runpod_perception_url: str = ""
-
-    # Bright Data: web search for unfamiliar objects + training-data gathering.
+    # Bright Data: web identification of unknown objects (edge LLM grounds on this) +
+    # training-data harvest for RSI.
     brightdata_api_key: str = ""
     brightdata_serp_zone: str = "serp"
     brightdata_unlocker_zone: str = "unlocker"
 
-    # Collision logic.
+    # RunPod GPU endpoint — RSI training only (no LLM, no per-frame inference).
+    runpod_api_key: str = ""
+    rsi_trainer_url: str = ""
+
+    # Collision thresholds (meters) served to the edge so tuning is centralized.
     collision_warn_m: float = 2.0
     collision_stop_m: float = 1.0
-    # Real-world width (meters) used to turn pixel width into a coarse distance in mock/local fallback.
-    focal_px: float = 700.0
 
-    # Local model weights (used when *_backend == "local").
-    yolo_weights: str = "yolov8n.pt"
-    depth_model: str = "depth-anything/Depth-Anything-V2-Small-hf"
+    # Edge model config. RSI publishes new detector weights to the manifest.
+    llm_model: str = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"
 
-    # RSI loop.
+    # RSI.
     rsi_enabled: bool = True
     rsi_min_confidence: float = 0.45
     rsi_review_every: int = 50

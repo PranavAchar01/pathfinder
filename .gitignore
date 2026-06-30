@@ -5,6 +5,8 @@ __pycache__/
 venv/
 .env
 *.pt
+*.onnx
+backend/models/detector.onnx
 data/harvest/
 data/rsi_ledger.jsonl
 .DS_Store

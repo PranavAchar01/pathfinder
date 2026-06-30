@@ -1,11 +1,11 @@
-name: Build perception image
+name: Build RSI trainer image
 
 on:
   push:
     branches: [main]
     paths:
-      - "runpod/perception/**"
-      - ".github/workflows/perception-image.yml"
+      - "runpod/rsi/**"
+      - ".github/workflows/rsi-image.yml"
   workflow_dispatch:
 
 jobs:
@@ -25,8 +25,8 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          context: runpod/perception
-          file: runpod/perception/Dockerfile
+          context: runpod/rsi
+          file: runpod/rsi/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ghcr.io/pranavachar01/pathfinder-perception:latest
+          tags: ghcr.io/pranavachar01/pathfinder-rsi:latest
