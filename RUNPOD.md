@@ -8,7 +8,7 @@ being served.
 
 | Resource | Type | ID | OpenAI / invoke URL |
 |---|---|---|---|
-| `pathfinder-qwen` | Serverless (vLLM) | `5mmdk7cfxkdtg6` | `https://api.runpod.ai/v2/5mmdk7cfxkdtg6/openai/v1` |
+| `pathfinder-qwen` | Serverless (vLLM) | `7gyxvsvtfeiqkm` | `https://api.runpod.ai/v2/7gyxvsvtfeiqkm/openai/v1` |
 | `pathfinder-perception` | Serverless (custom) | `f1jndtovwo2rjs` | `https://api.runpod.ai/v2/f1jndtovwo2rjs/runsync` |
 
 | Template | ID |
@@ -16,7 +16,9 @@ being served.
 | `pathfinder-qwen` (`runpod/worker-v1-vllm:v2.22.5`, `Qwen/Qwen2.5-0.5B-Instruct`) | `u830yqh4ih` |
 | `pathfinder-perception` (`ghcr.io/<owner>/pathfinder-perception:latest`) | `gim5kgbqcu` |
 
-GPU pool for both: RTX A4500 / A5000 / L4 / RTX 4090 (24 GB), 1 GPU, flashboot on.
+GPU pool for both (priority order): **RTX 5090** (High stock → fast scheduling) → RTX 4090
+→ L40S, 1 GPU, flashboot on. 5090 was chosen because every other fast card was Low stock,
+which is what stalled worker scheduling on the first attempt.
 
 ## Qwen — ready now
 
@@ -24,7 +26,7 @@ GPU pool for both: RTX A4500 / A5000 / L4 / RTX 4090 (24 GB), 1 GPU, flashboot o
 
 ```
 PATHFINDER_REASONING_BACKEND=runpod
-PATHFINDER_RUNPOD_QWEN_BASE_URL=https://api.runpod.ai/v2/5mmdk7cfxkdtg6/openai/v1
+PATHFINDER_RUNPOD_QWEN_BASE_URL=https://api.runpod.ai/v2/7gyxvsvtfeiqkm/openai/v1
 PATHFINDER_RUNPOD_QWEN_MODEL=Qwen/Qwen2.5-0.5B-Instruct
 ```
 
