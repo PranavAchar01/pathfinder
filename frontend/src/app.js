@@ -4,6 +4,7 @@ import { LLM } from "./llm.js";
 import { fuse } from "./fusion.js";
 import { assess, vibrate } from "./collision.js";
 import { identify, Telemetry } from "./rsi.js";
+import { probeWebGPU } from "./webgpu.js";
 
 const els = {
   cam: document.getElementById("cam"),
@@ -48,16 +49,26 @@ function speak(text) {
 
 async function boot() {
   try { cfg = await fetch("/api/config").then((r) => r.json()); } catch (e) { /* defaults */ }
+
+  const gpu = await probeWebGPU();
   detector = new Detector();
   depth = new Depth();
   llm = new LLM(cfg.llm_model);
 
-  setStatus("Loading on-device models…");
+  if (!gpu.ok) {
+    // No WebGPU: skip the (doomed) GPU model loads, run the mock loop so the UI still works.
+    setStatus(`⚠ ${gpu.reason} — running in mock mode`);
+    els.start.disabled = false;
+    els.start.textContent = "Start (mock)";
+    return;
+  }
+
+  setStatus(`WebGPU ✓ ${gpu.name}${gpu.fp16 ? " · fp16" : ""} — loading models…`);
   const [det, dep] = await Promise.all([detector.load(), depth.load()]);
-  setStatus(`detector:${det} · depth:${dep ? "webgpu" : "mock"} · loading LLM…`);
+  setStatus(`GPU ✓ ${gpu.name} · detect:${det} · depth:${dep ? "webgpu" : "cpu"} · LLM…`);
   // LLM is heaviest; load in background so navigation can start immediately.
-  llm.load((p) => setStatus(`LLM ${(p.progress * 100 || 0).toFixed(0)}% ${p.text || ""}`.slice(0, 60)))
-    .then((ok) => setStatus(ok ? "ready (LLM on edge)" : "ready (LLM mock — no WebGPU)"));
+  llm.load((p) => setStatus(`LLM ${((p.progress || 0) * 100).toFixed(0)}% on ${gpu.name}`.slice(0, 60)))
+    .then((ok) => setStatus(`GPU ✓ ${gpu.name} · detect:${det} · depth:${dep ? "webgpu" : "cpu"} · llm:${ok ? "webgpu" : "mock"}`));
   els.start.disabled = false;
   els.start.textContent = "Start navigation";
 }
