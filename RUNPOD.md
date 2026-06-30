@@ -16,9 +16,9 @@ being served.
 | `pathfinder-qwen` (`runpod/worker-v1-vllm:v2.22.5`, `Qwen/Qwen2.5-0.5B-Instruct`) | `u830yqh4ih` |
 | `pathfinder-perception` (`ghcr.io/<owner>/pathfinder-perception:latest`) | `gim5kgbqcu` |
 
-GPU pool for both (priority order): **RTX 5090** (High stock → fast scheduling) → RTX 4090
-→ L40S, 1 GPU, flashboot on. 5090 was chosen because every other fast card was Low stock,
-which is what stalled worker scheduling on the first attempt.
+GPU pool for both (priority order): **RTX 4090** → L40S → RTX A5000, 1 GPU, flashboot on.
+The 4090 is well-supported by the vLLM worker (no Blackwell/CUDA-compat risk) and is
+broadly available, so workers schedule reliably for real-time use.
 
 ## Qwen — ready now
 
