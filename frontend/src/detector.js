@@ -20,7 +20,8 @@ export class Detector {
     this.labels = COCO_FALLBACK;
     this.size = 640;
     this.version = 0;
-    this.confThreshold = 0.35;
+    // Match SixthSense YoloDecoder: confThresh 0.25, iouThresh 0.45.
+    this.confThreshold = 0.25;
     this.iouThreshold = 0.45;
   }
 

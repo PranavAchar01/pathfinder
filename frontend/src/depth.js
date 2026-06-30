@@ -2,8 +2,10 @@ import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transfo
 
 env.allowLocalModels = false;
 
-// On-device monocular depth via WebGPU (Depth Anything V2 small). Returns a metric-ish
-// depth grid (meters, smaller = closer). Falls back to a floor-plane heuristic.
+// On-device monocular depth via WebGPU — Depth-Anything-V2-Small, the EXACT model
+// SixthSense uses. Returns the raw INVERSE-RELATIVE depth grid (LARGER = CLOSER),
+// unnormalized; scene.js (port of SixthSense DepthDecoder) does the zone math.
+// Falls back to a floor-plane heuristic that is also larger-at-bottom (= nearer).
 export class Depth {
   constructor() {
     this.pipe = null;
@@ -35,21 +37,9 @@ export class Depth {
     const dims = t.dims;
     const h = dims[dims.length - 2];
     const w = dims[dims.length - 1];
-    const raw = t.data;
-
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (let i = 0; i < raw.length; i++) {
-      if (raw[i] < lo) lo = raw[i];
-      if (raw[i] > hi) hi = raw[i];
-    }
-    const span = hi - lo || 1;
-    // Depth Anything outputs larger = closer; invert and scale to ~0.5-8 m.
-    const meters = new Float32Array(raw.length);
-    for (let i = 0; i < raw.length; i++) {
-      meters[i] = 0.5 + (1 - (raw[i] - lo) / span) * 7.5;
-    }
-    return { data: meters, width: w, height: h };
+    // Depth-Anything-V2 output is inverse relative depth: larger = closer. SixthSense's
+    // DepthDecoder consumes exactly this, so pass it through raw.
+    return { data: t.data, width: w, height: h };
   }
 
   _mock(canvas) {
@@ -57,8 +47,8 @@ export class Depth {
     const h = 64;
     const data = new Float32Array(w * h);
     for (let y = 0; y < h; y++) {
-      const m = 0.6 + (1 - y / h) * 5.4; // bottom of frame is nearer
-      for (let x = 0; x < w; x++) data[y * w + x] = m;
+      const near = 0.2 + (y / h) * 0.8; // inverse depth: bottom rows larger = nearer
+      for (let x = 0; x < w; x++) data[y * w + x] = near;
     }
     return { data, width: w, height: h };
   }

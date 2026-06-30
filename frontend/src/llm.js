@@ -61,9 +61,10 @@ export class LLM {
 
   async chat(text, scene, webContext) {
     if (this.mock) return this._fallbackChat(scene);
+    const band = (n) => (n >= 0.7 ? "very near" : n >= 0.45 ? "near" : "far");
     const sceneText = scene?.objects?.length
       ? "Scene: " + scene.objects.slice(0, 8).map((o) =>
-          `${o.label} ${o.distance_m}m ${o.side}`).join("; ")
+          `${o.label} (${band(o.nearness)}, ${o.zone})`).join("; ")
       : "Scene: nothing notable detected.";
     const messages = [
       { role: "system", content: CHAT_SYS },
@@ -87,6 +88,6 @@ export class LLM {
   _fallbackChat(scene) {
     if (!scene?.objects?.length) return "I don't detect anything notable right now.";
     const n = scene.objects[0];
-    return `Nearest is a ${n.label}, about ${Math.round(n.distance_m)} meters ${n.side}.`;
+    return `Nearest is a ${n.label} on your ${n.zone}.`;
   }
 }

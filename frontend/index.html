@@ -7,20 +7,63 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div id="stage">
-    <video id="cam" playsinline autoplay muted></video>
-    <canvas id="overlay"></canvas>
-    <div id="risk" class="clear">CLEAR</div>
-    <div id="status">starting…</div>
-    <div id="narration" aria-live="polite"></div>
-  </div>
+  <header class="appbar">
+    <div class="brand">Path<b>finder</b></div>
+    <div class="statuses">
+      <span class="pill" id="status">starting…</span>
+    </div>
+  </header>
+
+  <!-- Big binary state: GREEN = clear, RED = obstacle (audio + haptics fire). -->
+  <div id="state" class="state state--green">CLEAR</div>
+
+  <main>
+    <section class="card">
+      <div class="card__head">Camera — live YOLO11 + Depth-Anything-V2</div>
+      <div class="canvas-wrap">
+        <video id="cam" playsinline autoplay muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div id="narration" aria-live="assertive"></div>
+    </section>
+
+    <section class="card">
+      <div class="card__head">Depth nearness — left / center / right</div>
+      <div class="zones">
+        <div class="zone" data-zone="left">
+          <div class="zone__name">LEFT</div>
+          <div class="zone__track"><div class="zone__thresh"></div><div class="zone__fill"></div></div>
+          <div class="zone__val">—</div>
+        </div>
+        <div class="zone" data-zone="center">
+          <div class="zone__name">CENTER</div>
+          <div class="zone__track"><div class="zone__thresh"></div><div class="zone__fill"></div></div>
+          <div class="zone__val">—</div>
+        </div>
+        <div class="zone" data-zone="right">
+          <div class="zone__name">RIGHT</div>
+          <div class="zone__track"><div class="zone__thresh"></div><div class="zone__fill"></div></div>
+          <div class="zone__val">—</div>
+        </div>
+      </div>
+      <p class="note">Dashed line = NEAR_THRESHOLD 0.55. Bar turns red past it.</p>
+    </section>
+
+    <section class="card">
+      <div class="card__head">Object detection — YOLO11</div>
+      <table class="data">
+        <thead><tr><th>Object</th><th>Zone</th><th>Near</th><th>Conf</th></tr></thead>
+        <tbody id="objects"></tbody>
+      </table>
+      <div class="empty" id="objects-empty">No detections yet.</div>
+    </section>
+  </main>
 
   <div id="controls">
     <button id="start" disabled>Loading models…</button>
     <button id="talk">HOLD TO SPEAK</button>
-    <label class="toggle"><input type="checkbox" id="speak" checked /> Speak guidance aloud</label>
+    <label class="toggle"><input type="checkbox" id="speak" checked /> Speak alerts aloud</label>
   </div>
-
   <div id="reply" aria-live="polite"></div>
 
   <script type="module" src="/src/app.js"></script>

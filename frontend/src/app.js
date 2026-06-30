@@ -1,112 +1,126 @@
 import { Detector } from "./detector.js";
 import { Depth } from "./depth.js";
 import { LLM } from "./llm.js";
-import { fuse } from "./fusion.js";
-import { assess, vibrate } from "./collision.js";
+import { analyze } from "./scene.js";
+import { fire as fireHaptics } from "./haptics.js";
 import { identify, Telemetry } from "./rsi.js";
 import { probeWebGPU } from "./webgpu.js";
 
+const $ = (id) => document.getElementById(id);
 const els = {
-  cam: document.getElementById("cam"),
-  overlay: document.getElementById("overlay"),
-  risk: document.getElementById("risk"),
-  narration: document.getElementById("narration"),
-  reply: document.getElementById("reply"),
-  start: document.getElementById("start"),
-  talk: document.getElementById("talk"),
-  speak: document.getElementById("speak"),
-  status: document.getElementById("status"),
+  cam: $("cam"), overlay: $("overlay"), state: $("state"), status: $("status"),
+  narration: $("narration"), objects: $("objects"), objectsEmpty: $("objects-empty"),
+  start: $("start"), talk: $("talk"), speak: $("speak"), reply: $("reply"),
 };
+const zoneEls = {};
+document.querySelectorAll(".zone").forEach((z) => {
+  zoneEls[z.dataset.zone] = { root: z, fill: z.querySelector(".zone__fill"), val: z.querySelector(".zone__val") };
+});
 
 const ctx = els.overlay.getContext("2d");
 const proc = document.createElement("canvas");
-proc.width = 480;
-proc.height = 360;
+proc.width = 480; proc.height = 360;
 const pctx = proc.getContext("2d", { willReadFrequently: true });
 
 const PROC_FPS = 4;
-const GUIDE_MS = 1500;
+const ALERT_REPEAT_MS = 2500;   // don't re-speak the same alert faster than this
+const HAPTIC_REPEAT_MS = 700;   // re-buzz cadence while danger persists
 
-let cfg = { collision_warn_m: 2, collision_stop_m: 1, llm_model: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC" };
+let cfg = { llm_model: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC" };
 let detector, depth, llm;
 const telemetry = new Telemetry();
+let running = false, lastScene = null;
+let lastAlertText = "", lastAlertAt = 0, lastHapticAt = 0;
 
-let running = false;
-let lastScene = null;
-let lastGuideAt = 0;
-let lastSpoken = "";
+function setStatus(m) { els.status.textContent = m; }
 
-function setStatus(msg) { els.status.textContent = msg; }
-
-function speak(text) {
-  if (!els.speak.checked || !text || text === lastSpoken) return;
-  lastSpoken = text;
+function speak(text, { force = false } = {}) {
+  if (!els.speak.checked || !text) return;
+  const now = performance.now();
+  if (!force && text === lastAlertText && now - lastAlertAt < ALERT_REPEAT_MS) return;
+  lastAlertText = text; lastAlertAt = now;
   const u = new SpeechSynthesisUtterance(text);
-  u.rate = 1.1;
+  u.rate = 1.12;
   speechSynthesis.cancel();
   speechSynthesis.speak(u);
 }
 
 async function boot() {
-  try { cfg = await fetch("/api/config").then((r) => r.json()); } catch (e) { /* defaults */ }
-
+  try { cfg = await fetch("/api/config", { cache: "no-store" }).then((r) => r.json()); } catch (e) {}
   const gpu = await probeWebGPU();
-  detector = new Detector();
-  depth = new Depth();
-  llm = new LLM(cfg.llm_model);
+  detector = new Detector(); depth = new Depth(); llm = new LLM(cfg.llm_model);
 
   if (!gpu.ok) {
-    // No WebGPU: skip the (doomed) GPU model loads, run the mock loop so the UI still works.
-    setStatus(`⚠ ${gpu.reason} — running in mock mode`);
-    els.start.disabled = false;
-    els.start.textContent = "Start (mock)";
+    setStatus(`⚠ ${gpu.reason} — mock`);
+    els.start.disabled = false; els.start.textContent = "Start (mock)";
     return;
   }
-
-  setStatus(`WebGPU ✓ ${gpu.name}${gpu.fp16 ? " · fp16" : ""} — loading models…`);
+  setStatus(`WebGPU ✓ ${gpu.name} — loading…`);
   const [det, dep] = await Promise.all([detector.load(), depth.load()]);
   const detTag = det === "onnx" ? `yolo11(v${detector.version})` : det;
-  setStatus(`GPU ✓ ${gpu.name} · detect:${detTag} · depth:${dep ? "webgpu" : "cpu"} · LLM…`);
-  // LLM is heaviest; load in background so navigation can start immediately.
-  llm.load((p) => setStatus(`LLM ${((p.progress || 0) * 100).toFixed(0)}% on ${gpu.name}`.slice(0, 60)))
-    .then((ok) => setStatus(`GPU ✓ ${gpu.name} · detect:${detTag} · depth:${dep ? "webgpu" : "cpu"} · llm:${ok ? "webgpu" : "mock"}`));
-  els.start.disabled = false;
-  els.start.textContent = "Start navigation";
+  setStatus(`${gpu.name} · detect:${detTag} · depth:${dep ? "v2" : "mock"}`);
+  llm.load().then(() => {}); // background, for HOLD TO SPEAK Q&A only
+  els.start.disabled = false; els.start.textContent = "START";
 }
 
 async function startCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: "environment" }, width: 1280, height: 720 },
-    audio: false,
+    video: { facingMode: { ideal: "environment" }, width: 1280, height: 720 }, audio: false,
   });
   els.cam.srcObject = stream;
   await els.cam.play();
-  els.overlay.width = els.cam.videoWidth;
-  els.overlay.height = els.cam.videoHeight;
+  els.overlay.width = els.cam.videoWidth || 1280;
+  els.overlay.height = els.cam.videoHeight || 720;
 }
 
-function drawOverlay(objects) {
+function drawOverlay(scene) {
   ctx.clearRect(0, 0, els.overlay.width, els.overlay.height);
   const sx = els.overlay.width / proc.width;
   const sy = els.overlay.height / proc.height;
   ctx.lineWidth = 3;
   ctx.font = "bold 15px system-ui";
   ctx.textBaseline = "top";
-  for (const o of objects) {
-    const color = o.distance_m < 1 ? "#b91c1c" : o.distance_m < 2 ? "#f59e0b" : "#22d3ee";
-    const x = o.bbox.x1 * sx;
-    const y = o.bbox.y1 * sy;
-    const w = (o.bbox.x2 - o.bbox.x1) * sx;
-    const h = (o.bbox.y2 - o.bbox.y1) * sy;
+  for (const o of scene.objects) {
+    const near = o.nearness >= 0.45;
+    const color = near ? "#c01525" : "#15803d";
+    const x = o.bbox.x1 * sx, y = o.bbox.y1 * sy;
+    const w = (o.bbox.x2 - o.bbox.x1) * sx, h = (o.bbox.y2 - o.bbox.y1) * sy;
     ctx.strokeStyle = color;
     ctx.strokeRect(x, y, w, h);
-    // Verified label tag: class, confidence %, distance.
-    const tag = `${o.label} ${(o.confidence * 100).toFixed(0)}% · ${o.distance_m}m`;
+    const tag = `${o.label} ${(o.conf * 100).toFixed(0)}%`;
     const tw = ctx.measureText(tag).width + 10;
     ctx.fillStyle = color;
     ctx.fillRect(x, Math.max(0, y - 20), tw, 20);
-    ctx.fillStyle = "#000";
+    ctx.fillStyle = "#fff";
     ctx.fillText(tag, x + 5, Math.max(2, y - 18));
+  }
+}
+
+function renderZones(zones) {
+  for (const key of ["left", "center", "right"]) {
+    const z = zoneEls[key]; if (!z) continue;
+    const v = zones[key];
+    z.fill.style.height = `${Math.round(v * 100)}%`;
+    z.val.textContent = v.toFixed(2);
+    z.root.classList.toggle("is-near", v >= 0.55);
+  }
+}
+
+function renderObjects(objects) {
+  if (!objects.length) { els.objects.innerHTML = ""; els.objectsEmpty.style.display = "block"; return; }
+  els.objectsEmpty.style.display = "none";
+  els.objects.innerHTML = objects.slice(0, 6).map((o) =>
+    `<tr class="${o.nearness >= 0.45 ? "is-near" : ""}"><td>${o.label}</td><td>${o.zone}</td><td>${o.nearness.toFixed(2)}</td><td>${(o.conf * 100).toFixed(0)}%</td></tr>`
+  ).join("");
+}
+
+function renderState(scene) {
+  if (scene.danger) {
+    els.state.className = "state state--red";
+    els.state.textContent = "OBSTACLE";
+  } else {
+    els.state.className = "state state--green";
+    els.state.textContent = "CLEAR";
   }
 }
 
@@ -116,23 +130,28 @@ async function tick() {
   pctx.drawImage(els.cam, 0, 0, proc.width, proc.height);
 
   const [dets, dmap] = await Promise.all([detector.detect(proc), depth.estimate(proc)]);
-  const objects = fuse(dets, dmap, proc.width, proc.height);
-  const { risk, haptic } = assess(objects, cfg.collision_warn_m, cfg.collision_stop_m);
+  const scene = analyze(dets, dmap, proc.width, proc.height);
+  lastScene = scene;
 
-  lastScene = { objects, risk };
-  els.risk.textContent = risk.toUpperCase();
-  els.risk.className = risk;
-  drawOverlay(objects);
-  vibrate(haptic);
-  telemetry.observe(objects);
+  drawOverlay(scene);
+  renderZones(scene.zones);
+  renderObjects(scene.objects);
+  renderState(scene);
 
-  if (performance.now() - lastGuideAt > GUIDE_MS) {
-    lastGuideAt = performance.now();
-    llm.guide(objects).then((g) => {
-      els.narration.textContent = g;
-      if (risk !== "clear") speak(g);
-    });
+  if (scene.danger) {
+    els.narration.textContent = scene.announce;
+    speak(scene.announce);                                  // RED -> read what's in front
+    if (performance.now() - lastHapticAt > HAPTIC_REPEAT_MS) {
+      fireHaptics(scene.packet);                            // RED -> haptics fire
+      lastHapticAt = performance.now();
+    }
+  } else {
+    els.narration.textContent = "";
   }
+
+  telemetry.observe(scene.objects.map((o) => ({
+    label: o.label, confidence: o.conf, known: o.conf >= 0.5, distance_m: 0,
+  })));
 
   const elapsed = performance.now() - t0;
   setTimeout(tick, Math.max(0, 1000 / PROC_FPS - elapsed));
@@ -141,7 +160,7 @@ async function tick() {
 async function start() {
   await startCamera();
   running = true;
-  els.start.textContent = "Navigating…";
+  els.start.textContent = "RUNNING…";
   els.start.disabled = true;
   tick();
 }
@@ -149,33 +168,29 @@ async function start() {
 async function ask(text) {
   els.reply.textContent = "…";
   let web = "";
-  const unknown = lastScene?.objects?.find((o) => !o.known);
+  const unknown = lastScene?.objects?.find((o) => o.conf < 0.5);
   if (/what is|what's this|identify|describe this|unfamiliar/i.test(text) || unknown) {
     const res = await identify(text, unknown?.label);
     if (res.results?.length) web = res.results.map((r) => `- ${r.title}: ${r.snippet}`).join("\n");
   }
   const reply = await llm.chat(text, lastScene, web);
   els.reply.textContent = reply + (web ? "  (web)" : "");
-  lastSpoken = "";
-  speak(reply);
+  speak(reply, { force: true });
 }
 
 function setupVoice() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    els.talk.addEventListener("click", () => ask("What is around me?"));
-    return;
-  }
+  if (!SR) { els.talk.addEventListener("click", () => ask("What is in front of me?")); return; }
   const rec = new SR();
   rec.lang = "en-US";
   rec.onresult = (e) => ask(e.results[0][0].transcript);
   rec.onstart = () => els.talk.classList.add("listening");
   rec.onend = () => els.talk.classList.remove("listening");
-  const start = (e) => { e.preventDefault(); try { rec.start(); } catch (_) {} };
-  const stop = (e) => { e.preventDefault(); try { rec.stop(); } catch (_) {} };
-  els.talk.addEventListener("pointerdown", start);
-  els.talk.addEventListener("pointerup", stop);
-  els.talk.addEventListener("pointercancel", stop);
+  const s = (e) => { e.preventDefault(); try { rec.start(); } catch (_) {} };
+  const t = (e) => { e.preventDefault(); try { rec.stop(); } catch (_) {} };
+  els.talk.addEventListener("pointerdown", s);
+  els.talk.addEventListener("pointerup", t);
+  els.talk.addEventListener("pointercancel", t);
 }
 
 els.start.disabled = true;
