@@ -89,14 +89,23 @@ function drawOverlay(objects) {
   const sx = els.overlay.width / proc.width;
   const sy = els.overlay.height / proc.height;
   ctx.lineWidth = 3;
-  ctx.font = "16px system-ui";
+  ctx.font = "bold 15px system-ui";
+  ctx.textBaseline = "top";
   for (const o of objects) {
     const color = o.distance_m < 1 ? "#b91c1c" : o.distance_m < 2 ? "#f59e0b" : "#22d3ee";
+    const x = o.bbox.x1 * sx;
+    const y = o.bbox.y1 * sy;
+    const w = (o.bbox.x2 - o.bbox.x1) * sx;
+    const h = (o.bbox.y2 - o.bbox.y1) * sy;
     ctx.strokeStyle = color;
+    ctx.strokeRect(x, y, w, h);
+    // Verified label tag: class, confidence %, distance.
+    const tag = `${o.label} ${(o.confidence * 100).toFixed(0)}% · ${o.distance_m}m`;
+    const tw = ctx.measureText(tag).width + 10;
     ctx.fillStyle = color;
-    const b = o.bbox;
-    ctx.strokeRect(b.x1 * sx, b.y1 * sy, (b.x2 - b.x1) * sx, (b.y2 - b.y1) * sy);
-    ctx.fillText(`${o.label} ${o.distance_m}m`, b.x1 * sx + 4, b.y1 * sy + 18);
+    ctx.fillRect(x, Math.max(0, y - 20), tw, 20);
+    ctx.fillStyle = "#000";
+    ctx.fillText(tag, x + 5, Math.max(2, y - 18));
   }
 }
 
