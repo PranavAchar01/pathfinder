@@ -65,10 +65,11 @@ async function boot() {
 
   setStatus(`WebGPU ✓ ${gpu.name}${gpu.fp16 ? " · fp16" : ""} — loading models…`);
   const [det, dep] = await Promise.all([detector.load(), depth.load()]);
-  setStatus(`GPU ✓ ${gpu.name} · detect:${det} · depth:${dep ? "webgpu" : "cpu"} · LLM…`);
+  const detTag = det === "onnx" ? `yolo11(v${detector.version})` : det;
+  setStatus(`GPU ✓ ${gpu.name} · detect:${detTag} · depth:${dep ? "webgpu" : "cpu"} · LLM…`);
   // LLM is heaviest; load in background so navigation can start immediately.
   llm.load((p) => setStatus(`LLM ${((p.progress || 0) * 100).toFixed(0)}% on ${gpu.name}`.slice(0, 60)))
-    .then((ok) => setStatus(`GPU ✓ ${gpu.name} · detect:${det} · depth:${dep ? "webgpu" : "cpu"} · llm:${ok ? "webgpu" : "mock"}`));
+    .then((ok) => setStatus(`GPU ✓ ${gpu.name} · detect:${detTag} · depth:${dep ? "webgpu" : "cpu"} · llm:${ok ? "webgpu" : "mock"}`));
   els.start.disabled = false;
   els.start.textContent = "Start navigation";
 }

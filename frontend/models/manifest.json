@@ -1,9 +1,9 @@
 {
-  "version": 2,
+  "version": 3,
   "format": "yolo11-onnx",
   "url": "/models/detector.onnx",
   "input_size": 640,
-  "trained_by": "yolo11n.pt",
+  "trained_by": "yolo11m.pt",
   "note": "Run scripts/export_detector.py to populate detector.onnx, or the RSI trainer publishes a new version here. If absent, the edge falls back to mock detection.",
   "labels": [
     "person",

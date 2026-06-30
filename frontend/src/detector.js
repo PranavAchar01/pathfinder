@@ -33,13 +33,17 @@ export class Detector {
 
   async _tryOnnx() {
     try {
-      const m = await fetch("/models/manifest.json").then((r) => r.json());
-      const head = await fetch(m.url, { method: "HEAD" });
+      // no-store on the manifest so a new model version is always seen; the weights URL is
+      // version-stamped so the browser/CDN can't serve a stale .onnx after a redeploy.
+      const m = await fetch("/models/manifest.json", { cache: "no-store" }).then((r) => r.json());
+      this.version = m.version || 0;
+      const url = `${m.url}${m.url.includes("?") ? "&" : "?"}v=${this.version}`;
+      const head = await fetch(url, { method: "HEAD" });
       if (!head.ok) return false; // no RSI-published weights yet
       this.labels = m.labels?.length ? m.labels : COCO_FALLBACK;
       this.size = m.input_size || 640;
-      this.version = m.version || 0;
-      this.session = await ort.InferenceSession.create(m.url, { executionProviders: ["webgpu", "wasm"] });
+      this.session = await ort.InferenceSession.create(url, { executionProviders: ["webgpu", "wasm"] });
+      console.log(`[detector] YOLO onnx v${this.version} loaded (${m.trained_by || "?"})`);
       return true;
     } catch (e) {
       console.warn("[detector] no onnx:", e.message);
