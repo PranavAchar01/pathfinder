@@ -8,7 +8,7 @@ const COCO_FALLBACK = [
 ];
 
 // On-device object detection. Three tiers, chosen at load time:
-//   1. "onnx"         — RSI-trained YOLOv8 from /models/manifest.json (onnxruntime-web/WebGPU)
+//   1. "onnx"         — RSI-trained YOLO11 from /models/manifest.json (onnxruntime-web/WebGPU)
 //   2. "transformers" — Xenova/yolos-tiny from CDN (transformers.js/WebGPU); real detection
 //                       out-of-the-box, no weights to host. Used until RSI publishes an ONNX.
 //   3. "mock"         — random boxes, only if WebGPU is unavailable, so the app still runs.

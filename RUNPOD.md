@@ -25,7 +25,7 @@ PATHFINDER_RSI_TRAINER_URL=https://api.runpod.ai/v2/f1jndtovwo2rjs/runsync
 
 The backend `RSILoop` submits `{"input":{"task":"finetune","classes":[...],"shards":[...]}}`
 to the trainer when edge telemetry shows weak classes. `runpod/rsi/handler.py` fine-tunes
-YOLOv8 on the Bright-Data-harvested shards and exports ONNX, which is published back to the
+YOLO11 on the Bright-Data-harvested shards and exports ONNX, which is published back to the
 backend `/models` manifest for the edge to pull.
 
 ## One step to activate the trainer image

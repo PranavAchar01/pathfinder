@@ -20,7 +20,7 @@ def _finetune(inp: dict) -> dict:
 
     # Start from the current best weights; in production these come from a network volume /
     # object store so each cycle builds on the last (true recursive self-improvement).
-    model = YOLO(inp.get("base_weights", "yolov8n.pt"))
+    model = YOLO(inp.get("base_weights", "yolo11n.pt"))
 
     # A real run builds a dataset YAML from the harvested shards and trains:
     #   data_yaml = build_dataset(shards, classes)

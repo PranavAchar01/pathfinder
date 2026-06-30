@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Export a YOLOv8 detector to ONNX for the edge (browser) to run via onnxruntime-web.
+"""Export a YOLO11 detector to ONNX for the edge (browser) to run via onnxruntime-web.
 
     pip install ultralytics
-    python scripts/export_detector.py            # base yolov8n
+    python scripts/export_detector.py            # base yolo11n
     python scripts/export_detector.py best.pt    # an RSI-trained checkpoint
 
 Writes backend/models/detector.onnx and bumps backend/models/manifest.json. If this file
@@ -19,7 +19,7 @@ MANIFEST = MODELS / "manifest.json"
 
 
 def main() -> None:
-    weights = sys.argv[1] if len(sys.argv) > 1 else "yolov8n.pt"
+    weights = sys.argv[1] if len(sys.argv) > 1 else "yolo11n.pt"
     from ultralytics import YOLO
 
     model = YOLO(weights)

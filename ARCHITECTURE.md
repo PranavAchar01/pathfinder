@@ -16,7 +16,7 @@ heavy, infrequent job: **retraining the detector (RSI)**.
 ## Edge real-time loop (`frontend/src/app.js`, ~4 fps)
 
 1. Draw the camera frame to a 480×360 processing canvas.
-2. In parallel: `Detector.detect` (YOLOv8 ONNX via onnxruntime-web/WebGPU) and
+2. In parallel: `Detector.detect` (YOLO11 ONNX via onnxruntime-web/WebGPU) and
    `Depth.estimate` (Depth Anything V2 via transformers.js/WebGPU).
 3. `fuse()` samples the nearest-15th-percentile depth inside each detection box →
    `distance_m`, and maps box center-x → `side` (left/center/right) + `clock` (9=hard left,
@@ -49,7 +49,7 @@ Hold-to-talk → Web Speech API transcript → `app.ask()`:
 3. `TrainingDataIngestor` uses **Bright Data** to harvest reference data for those classes
    into `data/harvest/<label>.jsonl`.
 4. `_trigger_finetune` submits `{"task":"finetune", classes, shards}` to the **RunPod** RSI
-   endpoint (`runpod/rsi/handler.py`), which fine-tunes YOLOv8 on the GPU and exports ONNX.
+   endpoint (`runpod/rsi/handler.py`), which fine-tunes YOLO11 on the GPU and exports ONNX.
 5. The new weights + `manifest.json` are published under the backend's **`/models`**; the
    edge `Detector` reads the manifest on load and runs the improved model. Every cycle is
    appended to `data/rsi_ledger.jsonl`.
