@@ -17,33 +17,17 @@ class TrainingDataIngestor:
         self.out_dir = Path(self.settings.rsi_data_dir) / "harvest"
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
-    def gather(self, label: str, count: int = 20) -> dict:
-        """Collect reference imagery for one class. Downloads real image bytes through Bright
-        Data (SERP image search -> Web Unlocker fetch) into data/harvest/<label>/ and writes a
-        shard manifest the trainer self-labels on."""
+    def gather(self, label: str, count: int = 30) -> dict:
+        """Collect reference image URLs for one class via Bright Data SERP image search and
+        write a shard manifest. The GPU trainer downloads + self-labels these directly, so the
+        backend keeps only the URLs (no slow per-image fetch here)."""
         slug = label.replace(" ", "_")
-        img_dir = self.out_dir / slug
-        img_dir.mkdir(parents=True, exist_ok=True)
-
-        hits = self.search.image_search(f"{label}", limit=count)
-        records = []
-        for i, r in enumerate(hits):
-            rec = {"label": label, "title": r.title, "url": r.url, "image_url": r.image, "file": ""}
-            if r.image and self.settings.brightdata_api_key:
-                try:
-                    data = self.search.fetch_bytes(r.image)
-                    if data and len(data) > 1024:
-                        fp = img_dir / f"{slug}_{i:03d}.jpg"
-                        fp.write_bytes(data)
-                        rec["file"] = str(fp)
-                except Exception:  # noqa: BLE001 - a dead image URL must not kill the harvest
-                    pass
-            records.append(rec)
+        hits = self.search.image_search(label, limit=count)
+        records = [{"label": label, "title": r.title, "url": r.url, "image_url": r.image}
+                   for r in hits if r.image]
 
         shard = self.out_dir / f"{slug}.jsonl"
         with shard.open("w") as fh:
             for rec in records:
                 fh.write(json.dumps(rec) + "\n")
-
-        downloaded = sum(1 for r in records if r["file"])
-        return {"label": label, "records": len(records), "images": downloaded, "shard": str(shard)}
+        return {"label": label, "records": len(records), "images": len(records), "shard": str(shard)}
