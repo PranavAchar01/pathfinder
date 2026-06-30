@@ -1,3 +1,2 @@
-# Upload everything in this dir (incl. models/detector.onnx) to Vercel.
 .git
 node_modules
