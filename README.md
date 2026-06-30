@@ -1,5 +1,7 @@
 # Pathfinder
 
+**Live (open in Chrome, allow camera + mic):** https://pathfinder-ten-delta.vercel.app
+
 A wearable navigation aid for blind and low-vision users — **web only, edge-first**.
 You mount a phone on your chest, open the web app, and **everything in the real-time loop
 runs on the device, in the browser**, for the lowest possible latency:
