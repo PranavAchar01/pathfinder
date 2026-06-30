@@ -25,6 +25,7 @@ export class Detector {
     this.size = 640;
     this.version = 0;
     this.modelName = "yolo11";
+    this.fp16 = false; // set from the WebGPU adapter; fp16 is NOT safe on iOS (no shader-f16)
     // Match SixthSense YoloDecoder: confThresh 0.25, iouThresh 0.45.
     this.confThreshold = 0.25;
     this.iouThreshold = 0.45;
@@ -43,7 +44,11 @@ export class Detector {
     try {
       const { pipeline, env } = await import(TJS);
       env.allowLocalModels = false;
-      this.tjs = await pipeline("object-detection", "onnx-community/rfdetr_medium-ONNX", { device: "webgpu", dtype: "fp16" });
+      // fp16 only where the GPU actually supports shader-f16 (desktop/Android). On iOS that
+      // feature is absent, so fall back to fp32 — this is what loaded fine originally.
+      const opts = { device: "webgpu" };
+      if (this.fp16) opts.dtype = "fp16";
+      this.tjs = await pipeline("object-detection", "onnx-community/rfdetr_medium-ONNX", opts);
       this.tjsThreshold = 0.4; // DETR scores are well-calibrated
       this.labels = [];        // pipeline returns label strings directly
       return true;

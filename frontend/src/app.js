@@ -87,14 +87,20 @@ function speak(text, { force = false } = {}) {
 async function boot() {
   try { cfg = await fetch("/api/config", { cache: "no-store" }).then((r) => r.json()); } catch (e) {}
   const gpu = await probeWebGPU();
-  detector = new Detector(); depth = new Depth(); llm = new LLM(cfg.llm_model);
+  detector = new Detector();
+  depth = new Depth();
+  // iOS WebGPU usually lacks shader-f16 -> any *f16 model fails to load. Pick f16 builds only
+  // when the adapter reports support; otherwise use fp32/q4f32 (loads fine on iPhone).
+  const llmModel = gpu.fp16 ? cfg.llm_model : cfg.llm_model.replace("q4f16_1", "q4f32_1");
+  llm = new LLM(llmModel);
 
   if (!gpu.ok) {
     setStatus(`⚠ ${gpu.reason} — mock`);
     els.start.disabled = false; els.start.textContent = "Start (mock)";
     return;
   }
-  setStatus(`WebGPU ✓ ${gpu.name} — loading…`);
+  detector.fp16 = gpu.fp16;
+  setStatus(`WebGPU ✓ ${gpu.name}${gpu.fp16 ? " · fp16" : " · fp32(iOS)"} — loading…`);
   const [det, dep] = await Promise.all([detector.load(), depth.load()]);
   const detTag = det === "onnx" ? `${detector.modelName}(v${detector.version})`
     : det === "rfdetr" ? "rf-detr·m"
