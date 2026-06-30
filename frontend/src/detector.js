@@ -24,14 +24,16 @@ export class Detector {
     this.labels = COCO_FALLBACK;
     this.size = 640;
     this.version = 0;
+    this.modelName = "yolo11";
     // Match SixthSense YoloDecoder: confThresh 0.25, iouThresh 0.45.
     this.confThreshold = 0.25;
     this.iouThreshold = 0.45;
   }
 
   async load() {
-    if (await this._tryRfdetr()) this.mode = "rfdetr";
-    else if (await this._tryOnnx()) this.mode = "onnx";
+    // YOLO (onnx) is the primary detector; RF-DETR / yolos-tiny are fallbacks.
+    if (await this._tryOnnx()) this.mode = "onnx";
+    else if (await this._tryRfdetr()) this.mode = "rfdetr";
     else if (await this._tryTransformers()) this.mode = "transformers";
     else this.mode = "mock";
     return this.mode;
@@ -57,6 +59,7 @@ export class Detector {
       // version-stamped so the browser/CDN can't serve a stale .onnx after a redeploy.
       const m = await fetch("/models/manifest.json", { cache: "no-store" }).then((r) => r.json());
       this.version = m.version || 0;
+      this.modelName = (m.trained_by || "yolo11").replace(/\.pt$/, "");
       const url = `${m.url}${m.url.includes("?") ? "&" : "?"}v=${this.version}`;
       const head = await fetch(url, { method: "HEAD" });
       if (!head.ok) return false; // no RSI-published weights yet

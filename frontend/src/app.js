@@ -57,8 +57,8 @@ async function boot() {
   }
   setStatus(`WebGPU ✓ ${gpu.name} — loading…`);
   const [det, dep] = await Promise.all([detector.load(), depth.load()]);
-  const detTag = det === "rfdetr" ? "rf-detr·m"
-    : det === "onnx" ? `yolo11(v${detector.version})`
+  const detTag = det === "onnx" ? `${detector.modelName}(v${detector.version})`
+    : det === "rfdetr" ? "rf-detr·m"
     : det === "transformers" ? "yolos-tiny"
     : det;
   setStatus(`${gpu.name} · detect:${detTag} · depth:${dep ? "v2" : "mock"}`);
