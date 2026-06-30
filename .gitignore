@@ -1,0 +1,11 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+venv/
+.env
+*.pt
+data/harvest/
+data/rsi_ledger.jsonl
+.DS_Store
+node_modules/

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Pathfinder</title>
+  <link rel="stylesheet" href="/app/styles.css" />
+</head>
+<body>
+  <div id="stage">
+    <video id="cam" playsinline autoplay muted></video>
+    <canvas id="overlay"></canvas>
+    <div id="risk" class="clear">CLEAR</div>
+    <div id="narration" aria-live="polite"></div>
+  </div>
+
+  <div id="controls">
+    <button id="start" class="primary">Start navigation</button>
+    <button id="talk">🎤 Hold to ask</button>
+    <label class="toggle"><input type="checkbox" id="speak" checked /> Speak guidance</label>
+  </div>
+
+  <div id="reply" aria-live="polite"></div>
+
+  <script src="/app/app.js"></script>
+</body>
+</html>
